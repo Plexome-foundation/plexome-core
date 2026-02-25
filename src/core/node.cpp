@@ -23,7 +23,6 @@ Node::~Node() {
 
 void Node::init() {
     std::cout << "[System] Initializing Plexome Enterprise Node..." << std::endl;
-    // Используем твои uint16_t и строковые поля
     std::cout << "[System] Node ID: " << config_.node_id << " | Port: " << config_.port << std::endl;
 
     if (!std::filesystem::exists(config_.storage_path)) {
@@ -34,28 +33,26 @@ void Node::init() {
 void Node::run() {
     is_running_ = true;
 
-    // СЕТЕВАЯ ЛОГИКА
     if (config_.is_seed) {
-        // Запуск сервера на порту из конфига
+        // Запуск Seed-сервера (Windows Server 2025)
         if (!conn_manager_->start_server(static_cast<int>(config_.port))) {
             std::cerr << "[Network] Critical: Could not bind port " << config_.port << std::endl;
             return;
         }
     } else {
-        // Подключение к сиду через DNS
+        // Подключение Peer-ноды к Seed по DNS (Windows 11)
         std::cout << "[Network] Joining Swarm via DNS: " << config_.seed_host << std::endl;
         if (!conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) {
-            std::cout << "[Network] Seed unreachable. Mode: Standalone/Passive." << std::endl;
+            std::cout << "[Network] Warning: Seed unreachable. Node in autonomous mode." << std::endl;
         }
     }
 
-    // Запуск CLI
+    // Запуск консоли в отдельном потоке
     std::thread cli_thread(&Node::run_cli, this);
     cli_thread.detach(); 
 
-    std::cout << "[Core] Node is operational. Type 'help' for commands." << std::endl;
+    std::cout << "[Core] Node logic started. Operational path: " << config_.storage_path << std::endl;
     
-    // Основной цикл
     while (is_running_) {
         process_core_logic();
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -78,17 +75,18 @@ void Node::run_cli() {
         } 
         else if (input == "peers") {
             size_t count = conn_manager_->get_active_peers_count();
-            std::cout << "[Network] Active TCP connections: " << count << std::endl;
+            std::cout << "[Network] Active connections: " << count << std::endl;
         } 
         else if (input == "stats") {
-            std::cout << "\n--- Node Stats ---\n"
+            std::cout << "\n--- Node Statistics ---\n"
+                      << "ID:      " << config_.node_id << "\n"
                       << "Role:    " << (config_.is_seed ? "SEED" : "PEER") << "\n"
                       << "Port:    " << config_.port << "\n"
-                      << "Storage: " << config_.storage_path << "\n"
-                      << "RAM Lim: " << config_.ram_limit_bytes << " bytes\n\n";
+                      << "VRAM Lim:" << config_.vram_limit_bytes << " bytes\n"
+                      << "Status:  ONLINE\n\n";
         }
         else if (input == "help") {
-            std::cout << "\nCommands: peers, stats, exit, help\n" << std::endl;
+            std::cout << "\nCommands: peers, stats, help, exit\n" << std::endl;
         }
         else {
             std::cout << "Unknown command. Type 'help'." << std::endl;
@@ -97,7 +95,7 @@ void Node::run_cli() {
 }
 
 void Node::process_core_logic() {
-    // Резерв под Gossip и задачи
+    // Будущая интеграция GossipService и TaskManager
 }
 
 void Node::stop() {
@@ -105,7 +103,7 @@ void Node::stop() {
     if (conn_manager_) {
         conn_manager_->stop();
     }
-    std::cout << "[System] Node stopped." << std::endl;
+    std::cout << "[System] Node shutdown initiated." << std::endl;
 }
 
 } // namespace plexome
