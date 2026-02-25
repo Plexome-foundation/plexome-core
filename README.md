@@ -39,3 +39,28 @@ The project is organized into isolated, maintainable blocks:
 │       └── network
 │           └── pxm_network.cpp # P2P communication stack
 └── models                  # Local storage for GGUF weights
+
+🏗 Build Instructions
+Plexome Core is built using CMake and requires a C++20 compliant compiler (MSVC 2022+ recommended for Windows).
+
+1. Clone with submodules
+git clone --recursive [https://github.com/Plexome-foundation/plexome-core](https://github.com/Plexome-foundation/plexome-core)
+2. Build the system
+mkdir build && cd build
+cmake ..
+cmake --build . --config Release
+3. Run the node
+As a Seed: plexome_host.exe --seed
+
+As a Peer: plexome_host.exe
+
+🗺 Roadmap
+[x] Transition to Modular DLL Architecture.
+
+[ ] Phase 3: Implement automated Hardware Benchmarking ("The Parrot Meter").
+
+[ ] Phase 4: Develop the Distributed Web-Scanner for automated knowledge injection.
+
+[ ] Phase 5: Peer-to-peer LoRA weight aggregation and consensus engine.
+
+Developed by Architect and the AI Swarm Community. Built for the era of autonomous intelligence.
