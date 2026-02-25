@@ -34,6 +34,8 @@ target_compile_definitions(pxm_network PRIVATE PXM_EXPORT)
 add_library(pxm_topology SHARED modules/topology/pxm_topology.cpp)
 target_compile_definitions(pxm_topology PRIVATE PXM_EXPORT)
 
+add_library(pxm_sharder SHARED modules/sharder/pxm_sharder.cpp)
+target_compile_definitions(pxm_sharder PRIVATE PXM_EXPORT)
 
 # 4. Plexome Host (The Main Executable)
 add_executable(plexome_host src/host/main.cpp)
