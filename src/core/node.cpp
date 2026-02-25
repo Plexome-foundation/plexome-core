@@ -31,17 +31,18 @@ void Node::init() {
         std::filesystem::create_directories(config_.storage_path);
     }
     
-    // Создаем папку для моделей, если её нет
     if (!std::filesystem::exists("./models")) {
         std::filesystem::create_directories("./models");
     }
 
-    // Автоматический поиск и загрузка первой GGUF модели
+    // Автоматическая загрузка первой модели GGUF
     std::cout << "[AI Core] Scanning ./models for GGUF files..." << std::endl;
     for (const auto& entry : std::filesystem::directory_iterator("./models")) {
         if (entry.path().extension() == ".gguf") {
-            std::cout << "[AI Core] Loading: " << entry.path().filename() << std::endl;
+            std::cout << "[AI Core] Attempting to load: " << entry.path().filename() << std::endl;
+            // Используем load_model, который у тебя точно есть
             if (engine_->load_model(entry.path().string())) {
+                std::cout << "[AI Core] Model loaded successfully." << std::endl;
                 break; 
             }
         }
@@ -81,25 +82,27 @@ void Node::run_cli() {
             break;
         } 
         else if (input == "ls") {
-            std::cout << "[AI Core] Model status: " << engine_->get_loaded_model_name() << std::endl;
+            // Убрал вызов get_loaded_model_name, так как его нет в твоем .h
+            std::cout << "[AI Core] Inference engine is active." << std::endl;
         }
         else if (input.rfind("ask ", 0) == 0) {
             std::string prompt = input.substr(4);
-            std::cout << "[AI Core] Processing..." << std::endl;
+            std::cout << "[AI Core] Processing prompt..." << std::endl;
+            // Вызов твоего метода predict
             std::string res = engine_->predict(prompt);
-            std::cout << "\n[AI]: " << res << "\n" << std::endl;
+            std::cout << "\n[AI Response]: " << res << "\n" << std::endl;
         }
         else if (input == "peers") {
             std::cout << "[Network] Active peers: " << conn_manager_->get_active_peers_count() << std::endl;
         }
         else if (input == "help") {
-            std::cout << "\nCommands: ask <text>, ls, peers, stats, exit\n" << std::endl;
+            std::cout << "\nCommands: ask <text>, ls, peers, exit\n" << std::endl;
         }
     }
 }
 
 void Node::process_core_logic() {
-    // Сканирование новых документов для базы знаний
+    // Сканирование знаний
     auto new_docs = knowledge_->scan_new_data();
     if (!new_docs.empty()) {
         std::cout << "\n[Knowledge] New data detected: " << new_docs.size() << " items." << std::endl;
