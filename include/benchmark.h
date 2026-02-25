@@ -1,15 +1,11 @@
 #pragma once
+#include "plexome_types.h"
 #include <cstdint>
 #include <string>
-#include <vector>
 
 namespace plexome {
 
-    enum class PerformanceTier {
-        Potato,   // Low-end VPS, older CPUs
-        Standard, // Modern PC, mid-range laptops
-        Titan     // Servers with high-core CPUs or High-end GPUs
-    };
+    // PerformanceTier is now defined in plexome_types.h
 
     struct BenchmarkResult {
         uint32_t score; // Those "Parrots" (PlexoFlops)
