@@ -39,9 +39,10 @@ void Node::run() {
     if (config_.is_seed) {
         conn_manager_->start_server(static_cast<int>(config_.port));
     } else {
-        std::cout << "[Network] Looking for swarm via " << config_.seed_host << "..." << std::endl;
+        std::cout << "[Network] Connecting to " << config_.seed_host << "..." << std::endl;
         for(int i = 0; i < 5; ++i) {
             if (conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) break;
+            std::cout << "[Network] Retrying... (" << i+1 << "/5)" << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(2));
         }
     }
@@ -60,12 +61,37 @@ void Node::run_cli() {
     while (is_running_) {
         std::cout << "pxm> " << std::flush;
         if (!std::getline(std::cin, input)) break;
-        if (input == "exit") { is_running_ = false; break; }
-        if (input == "stats") {
-            std::cout << "ID: " << config_.node_id << " Peers: " << conn_manager_->get_active_peers_count() << std::endl;
+        if (input.empty()) continue;
+
+        if (input == "exit" || input == "quit") {
+            is_running_ = false;
+            break;
+        } 
+        else if (input == "help" || input == "?") {
+            std::cout << "\n--- Available Commands ---\n"
+                      << "  ask <text> : Send prompt to AI\n"
+                      << "  stats      : Node status\n"
+                      << "  peers      : Active connections\n"
+                      << "  ls         : Model info\n"
+                      << "  exit       : Shutdown\n" << std::endl;
         }
-        if (input.rfind("ask ", 0) == 0) {
-            std::cout << engine_->predict(input.substr(4)) << std::endl;
+        else if (input == "stats") {
+            std::cout << "\n--- Stats ---\n"
+                      << "  ID:    " << config_.node_id << "\n"
+                      << "  Port:  " << config_.port << "\n"
+                      << "  Role:  " << (config_.is_seed ? "SEED" : "PEER") << "\n" << std::endl;
+        }
+        else if (input == "peers") {
+            std::cout << "[Network] Peers: " << conn_manager_->get_active_peers_count() << std::endl;
+        }
+        else if (input == "ls") {
+            std::cout << "[AI Core] Model loaded and ready." << std::endl;
+        }
+        else if (input.rfind("ask ", 0) == 0) {
+            std::cout << "\n[Response]: " << engine_->predict(input.substr(4)) << "\n" << std::endl;
+        }
+        else {
+            std::cout << "Unknown command. Type 'help'." << std::endl;
         }
     }
 }
