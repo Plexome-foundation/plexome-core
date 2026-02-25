@@ -7,17 +7,14 @@
     #define PXM_API extern "C"
 #endif
 
-// Structure to identify the module
 struct ModuleInfo {
     const char* name;
     const char* version;
-    const char* description;
 };
 
-// Function pointer types for dynamic loading
-typedef ModuleInfo (*PXM_GET_INFO_FUNC)();
-typedef bool (*PXM_INIT_FUNC)();
+// PXM_INIT_FUNC now accepts is_seed to configure the module role
+typedef bool (*PXM_INIT_FUNC)(bool is_seed); 
 typedef void (*PXM_SHUTDOWN_FUNC)();
-typedef void (*PXM_RUN_FUNC)(); // Main logic loop of the module
+typedef ModuleInfo (*PXM_GET_INFO_FUNC)();
 
-#endif // PXM_MODULE_INTERFACE_H
+#endif
