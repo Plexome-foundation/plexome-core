@@ -14,8 +14,7 @@ namespace plexome {
 ConnectionManager::ConnectionManager() 
     : listen_socket_(INVALID_SOCKET), is_running_(false), port_(0) {
     WSADATA wsaData;
-    int res = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (res != 0) std::cerr << "[Network] WSAStartup failed: " << res << std::endl;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
 }
 
 ConnectionManager::~ConnectionManager() {
@@ -37,7 +36,6 @@ bool ConnectionManager::start_server(int port) {
     server_addr.sin_port = htons((u_short)port_);
 
     if (bind(listen_socket_, (SOCKADDR*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-        std::cerr << "[Network] BIND ERROR: " << WSAGetLastError() << std::endl;
         closesocket(listen_socket_);
         return false;
     }
@@ -47,7 +45,6 @@ bool ConnectionManager::start_server(int port) {
         return false;
     }
 
-    // Вывод всех IP-адресов сервера для проверки
     char host_name[256];
     if (gethostname(host_name, sizeof(host_name)) == 0) {
         struct addrinfo hints = {}, *res = nullptr;
@@ -65,8 +62,8 @@ bool ConnectionManager::start_server(int port) {
     }
 
     is_running_ = true;
-    std::cout << "[Network] Seed listening on port: " << port_ << std::endl;
     accept_thread_ = std::thread(&ConnectionManager::accept_loop, this);
+    receive_thread_ = std::thread(&ConnectionManager::receive_loop, this); // Запуск слушателя
     return true;
 }
 
@@ -98,10 +95,7 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result) != 0) {
-        std::cerr << "[Network] DNS error: " << host << std::endl;
-        return false;
-    }
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result) != 0) return false;
 
     SOCKET s = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
     if (s == INVALID_SOCKET) {
@@ -110,11 +104,6 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
     }
 
     if (connect(s, result->ai_addr, (int)result->ai_addrlen) == SOCKET_ERROR) {
-        int err = WSAGetLastError();
-        std::cerr << "[Network] Connection to " << host << " failed! Error: " << err;
-        if (err == 10060) std::cerr << " (Timeout - Check Firewall)";
-        if (err == 10061) std::cerr << " (Refused - Check if Server is running)";
-        std::cerr << std::endl;
         closesocket(s);
         freeaddrinfo(result);
         return false;
@@ -126,6 +115,79 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
         active_sockets_.push_back((unsigned long long)s);
     }
     std::cout << "[Network] Connected to " << host << std::endl;
+    
+    // Если мы клиент, нам тоже нужно запустить слушателя ответов
+    if (!is_running_) {
+        is_running_ = true;
+        receive_thread_ = std::thread(&ConnectionManager::receive_loop, this);
+    }
+    return true;
+}
+
+// ОСНОВНАЯ ЛОГИКА ЧТЕНИЯ СООБЩЕНИЙ ОТ ВСЕХ ПИРОВ
+void ConnectionManager::receive_loop() {
+    while (is_running_) {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        SOCKET max_sd = 0;
+
+        {
+            std::lock_guard<std::mutex> lock(sockets_mtx_);
+            for (auto s : active_sockets_) {
+                FD_SET((SOCKET)s, &read_fds);
+                if ((SOCKET)s > max_sd) max_sd = (SOCKET)s;
+            }
+        }
+
+        if (max_sd == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100ms тайм-аут
+
+        int activity = select((int)max_sd + 1, &read_fds, NULL, NULL, &tv);
+        if (activity < 0) continue;
+
+        if (activity > 0) {
+            std::lock_guard<std::mutex> lock(sockets_mtx_);
+            for (auto it = active_sockets_.begin(); it != active_sockets_.end(); ) {
+                SOCKET s = (SOCKET)*it;
+                if (FD_ISSET(s, &read_fds)) {
+                    char buffer[4096] = {0};
+                    int valread = recv(s, buffer, sizeof(buffer) - 1, 0);
+                    if (valread > 0) {
+                        std::lock_guard<std::mutex> q_lock(queue_mtx_);
+                        message_queue_.push(std::string(buffer));
+                        ++it;
+                    } else {
+                        // Клиент отключился
+                        closesocket(s);
+                        it = active_sockets_.erase(it);
+                        std::cout << "\n[Network] [-] Peer disconnected. Total: " << active_sockets_.size() << "\npxm> " << std::flush;
+                    }
+                } else {
+                    ++it;
+                }
+            }
+        }
+    }
+}
+
+void ConnectionManager::broadcast(const std::string& message) {
+    std::lock_guard<std::mutex> lock(sockets_mtx_);
+    for (auto s : active_sockets_) {
+        send((SOCKET)s, message.c_str(), (int)message.length(), 0);
+    }
+}
+
+bool ConnectionManager::get_next_message(std::string& out_msg) {
+    std::lock_guard<std::mutex> lock(queue_mtx_);
+    if (message_queue_.empty()) return false;
+    out_msg = message_queue_.front();
+    message_queue_.pop();
     return true;
 }
 
@@ -140,13 +202,16 @@ void ConnectionManager::stop() {
         closesocket((SOCKET)listen_socket_);
         listen_socket_ = INVALID_SOCKET;
     }
+    
     std::lock_guard<std::mutex> lock(sockets_mtx_);
     for (auto s : active_sockets_) {
         shutdown((SOCKET)s, SD_BOTH);
         closesocket((SOCKET)s);
     }
     active_sockets_.clear();
+    
     if (accept_thread_.joinable()) accept_thread_.join();
+    if (receive_thread_.joinable()) receive_thread_.join();
 }
 
 } // namespace plexome
