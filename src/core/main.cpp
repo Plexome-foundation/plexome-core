@@ -1,6 +1,7 @@
 #include "node.h"
 #include "plexome_types.h"
 #include <iostream>
+#include <string>
 #include <csignal>
 
 #ifdef _WIN32
@@ -33,18 +34,42 @@ int main(int argc, char* argv[]) {
 #endif
 
     // 2. Настройка конфигурации
-    // Позже ты заменишь это на загрузку из файла через config_loader
     plexome::AppConfig config;
-    config.node_id = "PXM-MAIN-ALPHA";
     config.port = 7539;
-    
-    // ВАЖНО: Если запускаешь на сервере 2025, поставь здесь true
-    config.is_seed = false; 
     config.seed_host = "seed1.plexome.ai";
     config.storage_path = "./data";
 
+    // Базовые настройки для клиента (PEER)
+    config.is_seed = false; 
+    config.node_id = "PXM-WORKER";
+
+    // 3. ПЕРЕХВАТ КОМАНДНОЙ СТРОКИ
+    // Проверяем, не запустили ли нас с флагом --seed
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--seed") {
+            config.is_seed = true;
+            config.node_id = "PXM-SEED-SERVER";
+        }
+    }
+
+    // Если ты не умеешь/не хочешь запускать программу через консоль с аргументами,
+    // и просто кликаешь по .exe на сервере, раскомментируй строку ниже перед сборкой:
+    // config.is_seed = true;
+
+    // Выводим в консоль, кем мы в итоге стали
+    if (config.is_seed) {
+        std::cout << "========================================\n";
+        std::cout << "[System] LAUNCHING AS SEED (SERVER)\n";
+        std::cout << "========================================\n";
+    } else {
+        std::cout << "========================================\n";
+        std::cout << "[System] LAUNCHING AS PEER (CLIENT)\n";
+        std::cout << "========================================\n";
+    }
+
     try {
-        // 3. Создание и запуск ноды
+        // 4. Создание и запуск ноды
         plexome::Node node(config);
         g_node_ptr = &node;
 
@@ -59,7 +84,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "[Fatal Error] " << e.what() << std::endl;
     }
 
-    // 4. Очистка перед выходом
+    // 5. Очистка перед выходом
 #ifdef _WIN32
     WSACleanup();
 #endif
