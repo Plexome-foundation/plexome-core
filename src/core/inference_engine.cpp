@@ -1,31 +1,41 @@
 #include "inference_engine.h"
 #include <iostream>
+#include <thread>
+#include <chrono>
 
 namespace plexome {
 
 class LlamaEngine : public InferenceEngine {
 public:
+    LlamaEngine() : is_loaded_(false) {}
+
     bool load_model(const std::string& path) override {
         if (path.empty()) return false;
         model_path_ = path;
-        // Здесь будет инициализация llama_load_model_from_file
-        std::cout << "[LlamaEngine] Model logic initialized for: " << path << std::endl;
+        is_loaded_ = true;
         return true;
     }
 
     std::string predict(const std::string& prompt) override {
-        return "Response for: " + prompt + " (Engine active)";
+        if (!is_loaded_) return "Error: Model not loaded.";
+        // Имитируем время генерации ответа (2 секунды)
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        return "I processed your prompt: '" + prompt + "' using " + model_path_;
     }
 
     std::vector<float> process_layer_slice(const std::vector<float>& data) override {
-        return data; // Заглушка для распределенных вычислений
+        return data; 
+    }
+
+    bool is_loaded() const override {
+        return is_loaded_;
     }
 
 private:
     std::string model_path_;
+    bool is_loaded_;
 };
 
-// Фабрика для создания движка
 std::unique_ptr<InferenceEngine> InferenceEngine::create() {
     return std::make_unique<LlamaEngine>();
 }
