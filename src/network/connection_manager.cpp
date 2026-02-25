@@ -52,14 +52,11 @@ bool ConnectionManager::start_server(int port) {
 
 void ConnectionManager::accept_loop() {
     while (is_running_) {
-        // Нам нужно привести тип обратно к SOCKET для accept
         SOCKET s = accept((SOCKET)listen_socket_, NULL, NULL);
-        
         if (s == INVALID_SOCKET) {
             if (is_running_) continue; 
             else break; 
         }
-
         {
             std::lock_guard<std::mutex> lock(sockets_mtx_);
             active_sockets_.push_back((unsigned long long)s);
@@ -74,15 +71,12 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result) != 0) {
-        return false;
-    }
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result) != 0) return false;
 
     SOCKET s = INVALID_SOCKET;
     for (addrinfo* ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
         s = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
         if (s == INVALID_SOCKET) continue;
-
         if (connect(s, ptr->ai_addr, (int)ptr->ai_addrlen) == SOCKET_ERROR) {
             closesocket(s);
             s = INVALID_SOCKET;
@@ -90,17 +84,14 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
         }
         break; 
     }
-
     freeaddrinfo(result);
 
     if (s == INVALID_SOCKET) return false;
-
     {
         std::lock_guard<std::mutex> lock(sockets_mtx_);
         active_sockets_.push_back((unsigned long long)s);
     }
-    
-    std::cout << "[Network] Successfully connected to: " << host << std::endl;
+    std::cout << "[Network] Connected to seed: " << host << std::endl;
     return true;
 }
 
@@ -115,17 +106,13 @@ void ConnectionManager::stop() {
         closesocket((SOCKET)listen_socket_);
         listen_socket_ = INVALID_SOCKET;
     }
-    
     std::lock_guard<std::mutex> lock(sockets_mtx_);
     for (auto s : active_sockets_) {
-        shutdown((SOCKET)s, SD_BOTH);
+        shutdown((SOCKET)s, 2); // SD_BOTH
         closesocket((SOCKET)s);
     }
     active_sockets_.clear();
-
-    if (accept_thread_.joinable()) {
-        accept_thread_.join();
-    }
+    if (accept_thread_.joinable()) accept_thread_.join();
 }
 
 } // namespace plexome
