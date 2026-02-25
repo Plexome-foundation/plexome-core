@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.15)
 project(PlexomeCore LANGUAGES CXX)
+# ==========================================
+# Plexome: Static C++ Runtime Configuration
+# ==========================================
+if(MSVC)
+    # Принудительно используем статическую линковку (/MT вместо /MD)
+    # Это сделает .exe независимым от Visual C++ Redistributable
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
