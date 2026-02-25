@@ -1,29 +1,31 @@
 #include "task_manager.h"
-#include <iostream>
 
 namespace plexome {
 
-    TaskManager::TaskManager() {
-        std::cout << "[Task] Task Manager initialized. Ready for work orders." << std::endl;
-    }
-
-    void TaskManager::push_task(const Task& task) {
+    void TaskManager::push_task(const std::string& id, const std::string& data) {
         std::lock_guard<std::mutex> lock(mtx_);
-        queue_.push(task);
-        std::cout << "[Task] New task added to queue: " << task.task_id << std::endl;
+        Task t;
+        t.task_id = id;
+        t.payload = data;
+        t.is_completed = false;
+        queue_.push_back(t);
     }
 
     std::optional<Task> TaskManager::pull_next_task() {
         std::lock_guard<std::mutex> lock(mtx_);
-        if (queue_.empty()) return std::nullopt;
-
-        Task t = queue_.top();
-        queue_.pop();
+        if (queue_.empty()) {
+            return std::nullopt;
+        }
+        
+        // Take the first task and remove it from the vector
+        Task t = queue_.front();
+        queue_.erase(queue_.begin());
         return t;
     }
 
-    size_t TaskManager::pending_count() const {
+    size_t TaskManager::get_queue_size() {
         std::lock_guard<std::mutex> lock(mtx_);
         return queue_.size();
     }
+
 }
