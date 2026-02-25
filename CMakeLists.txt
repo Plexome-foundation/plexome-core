@@ -16,6 +16,7 @@ set(SOURCES
     src/core/consensus_engine.cpp
     src/core/integrity_checker.cpp
     src/core/stats_collector.cpp
+    src/core/config_loader.cpp
     src/network/bootstrap_manager.cpp
     src/network/connection_manager.cpp
     src/network/gossip_service.cpp
@@ -23,3 +24,5 @@ set(SOURCES
 
 add_executable(plexome_node ${SOURCES})
 target_link_libraries(plexome_node PUBLIC Threads::Threads stdc++fs)
+
+message(STATUS "Plexome Full Build Configuration: COMPLETE")
