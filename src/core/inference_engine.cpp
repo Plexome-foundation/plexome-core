@@ -2,36 +2,124 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <vector>
+
+// Подключаем заголовочный файл реальной библиотеки
+#include "llama.h"
 
 namespace plexome {
 
 class LlamaEngine : public InferenceEngine {
 public:
-    LlamaEngine() : is_loaded_(false) {}
+    LlamaEngine() : model_(nullptr), ctx_(nullptr), is_loaded_(false) {
+        // Инициализация бэкенда (CPU/GPU)
+        llama_backend_init(); 
+    }
+
+    ~LlamaEngine() {
+        if (ctx_) llama_free(ctx_);
+        if (model_) llama_free_model(model_);
+        llama_backend_free();
+    }
 
     bool load_model(const std::string& path) override {
-        if (path.empty()) return false;
+        std::cout << "[AI Core] Loading GGUF weights into memory from: " << path << "..." << std::endl;
+        
+        llama_model_params model_params = llama_model_default_params();
+        // ВАЖНО: Раскомментируй строку ниже, если у тебя есть видеокарта (CUDA/Vulkan)
+        // model_params.n_gpu_layers = 99; 
+        
+        model_ = llama_load_model_from_file(path.c_str(), model_params);
+        if (!model_) {
+            std::cerr << "[AI Core] CRITICAL: Failed to load model." << std::endl;
+            return false;
+        }
+
+        llama_context_params ctx_params = llama_context_default_params();
+        ctx_params.n_ctx = 2048; // Размер контекстного окна (память модели)
+        
+        ctx_ = llama_new_context_with_model(model_, ctx_params);
+        if (!ctx_) {
+            std::cerr << "[AI Core] CRITICAL: Failed to allocate context." << std::endl;
+            return false;
+        }
+
         model_path_ = path;
         is_loaded_ = true;
+        std::cout << "[AI Core] Engine online. Model ready for inference!" << std::endl;
         return true;
     }
 
     std::string predict(const std::string& prompt) override {
-        if (!is_loaded_) return "Error: Model not loaded.";
-        // Имитируем время генерации ответа (2 секунды)
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        return "I processed your prompt: '" + prompt + "' using " + model_path_;
+        if (!is_loaded_ || !ctx_) return "Error: Model is not initialized.";
+
+        std::cout << "[AI Core] Tokenizing prompt..." << std::endl;
+
+        // 1. Токенизация текста (превращаем буквы в числа, понятные нейросети)
+        std::vector<llama_token> tokens;
+        tokens.resize(prompt.size() + 4);
+        int n_tokens = llama_tokenize(model_, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), true, true);
+        if (n_tokens < 0) {
+            tokens.resize(-n_tokens);
+            n_tokens = llama_tokenize(model_, prompt.c_str(), prompt.length(), tokens.data(), tokens.size(), true, true);
+        }
+        tokens.resize(n_tokens);
+
+        // 2. Загрузка промпта в контекст модели
+        llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens, 0, 0);
+        if (llama_decode(ctx_, batch)) {
+            return "Error: Failed to decode prompt.";
+        }
+
+        std::cout << "[AI Core] Generating response..." << std::endl;
+
+        // 3. Цикл генерации ответа (токен за токеном)
+        std::string result = "";
+        int n_cur = n_tokens;
+        int n_predict = 256; // Максимальная длина ответа
+        const int n_vocab = llama_n_vocab(model_);
+
+        for (int i = 0; i < n_predict; i++) {
+            // Получаем вероятности для следующего слова
+            float* logits = llama_get_logits_ith(ctx_, batch.n_tokens - 1);
+            
+            // Выбираем самое вероятное слово (Greedy Decoding)
+            llama_token new_token_id = 0;
+            float max_logit = logits[0];
+            for (int v = 1; v < n_vocab; v++) {
+                if (logits[v] > max_logit) {
+                    max_logit = logits[v];
+                    new_token_id = v;
+                }
+            }
+
+            // Если модель решила, что мысль закончена — прерываем цикл
+            if (new_token_id == llama_token_eos(model_)) break;
+
+            // Конвертируем число обратно в текст и добавляем к результату
+            char buf[128];
+            int n = llama_token_to_piece(model_, new_token_id, buf, sizeof(buf), 0, false);
+            if (n > 0) result += std::string(buf, n);
+
+            // Скармливаем сгенерированное слово обратно в модель для следующего шага
+            batch = llama_batch_get_one(&new_token_id, 1, n_cur, 0);
+            if (llama_decode(ctx_, batch)) break;
+            
+            n_cur += 1;
+        }
+
+        return result;
     }
 
     std::vector<float> process_layer_slice(const std::vector<float>& data) override {
-        return data; 
+        return data; // Задел на будущее для распределенных матричных вычислений
     }
 
-    bool is_loaded() const override {
-        return is_loaded_;
-    }
+    bool is_loaded() const override { return is_loaded_; }
 
 private:
+    llama_model* model_;
+    llama_context* ctx_;
     std::string model_path_;
     bool is_loaded_;
 };
