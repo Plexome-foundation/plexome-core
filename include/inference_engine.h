@@ -8,6 +8,8 @@ namespace plexome {
 
     class InferenceEngine {
     public:
+        static std::unique_ptr<InferenceEngine> create();
+
         virtual ~InferenceEngine() = default;
 
         // Load GGUF models (Llama-3, Phi-3, etc.)
@@ -17,6 +19,7 @@ namespace plexome {
         virtual std::string predict(const std::string& prompt) = 0;
 
         virtual std::vector<float> process_layer_slice(const std::vector<float>& input_tensor) = 0;
+
     };
 
     class EngineFactory {
