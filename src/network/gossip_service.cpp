@@ -1,35 +1,36 @@
 #include "gossip_service.h"
 #include <iostream>
-#include <random>
+#include <algorithm>
+#include <random> // КРИТИЧНО: Убедились, что random подключен
 
 namespace plexome {
 
-    GossipService::GossipService() {
-        std::cout << "[Gossip] Service initialized." << std::endl;
+    void GossipService::start_gossip_protocol() {
+        std::cout << "[Network] Initiating Gossip Protocol for peer discovery..." << std::endl;
+        is_running_ = true;
+        // In a real implementation, this would spin up a background thread
     }
 
-    bool GossipService::process_message(const std::string& message_id) {
-        std::lock_guard<std::mutex> lock(mtx_);
-        if (seen_messages_.find(message_id) != seen_messages_.end()) {
-            return false; // Already seen
-        }
-        seen_messages_.insert(message_id);
-        return true; // New message
+    void GossipService::stop_gossip_protocol() {
+        is_running_ = false;
+        std::cout << "[Network] Gossip Protocol stopped." << std::endl;
     }
 
-    std::vector<PeerID> GossipService::select_targets(const std::vector<PeerID>& peers, size_t fanout) {
-        if (peers.empty()) return {};
+    std::vector<PeerID> GossipService::get_random_peers(size_t count, const std::vector<PeerID>& all_known_peers) {
+        if (all_known_peers.empty() || count == 0) return {};
+
+        std::vector<PeerID> selected_peers = all_known_peers;
         
-        std::vector<PeerID> targets;
-        std::vector<PeerID> shuffled_peers = peers;
-        
+        // Исправлена опечатка: mt19937 вместо mtf19937
         std::random_device rd;
-        std::mtf19937 g(rd());
-        std::shuffle(shuffled_peers.begin(), shuffled_peers.end(), g);
-
-        for (size_t i = 0; i < std::min(fanout, shuffled_peers.size()); ++i) {
-            targets.push_back(shuffled_peers[i]);
+        std::mt19937 g(rd());
+        
+        std::shuffle(selected_peers.begin(), selected_peers.end(), g);
+        
+        if (selected_peers.size() > count) {
+            selected_peers.resize(count);
         }
-        return targets;
+        
+        return selected_peers;
     }
 }
