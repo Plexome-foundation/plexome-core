@@ -1,45 +1,46 @@
-#include "connection_manager.h"
-#include <iostream>
-#include <chrono>
+bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
+#ifdef _WIN32
+        addrinfo hints = {0};
+        addrinfo* result = nullptr;
 
-namespace plexome {
+        hints.ai_family = AF_INET;       // IPv4
+        hints.ai_socktype = SOCK_STREAM; // TCP
+        hints.ai_protocol = IPPROTO_TCP;
 
-    ConnectionManager::ConnectionManager() {
-        std::cout << "[Network] Connection Manager initialized." << std::endl;
-    }
+        std::string port_str = std::to_string(port);
+        std::cout << "[Network] Resolving DNS for seed: " << host << "...\n";
 
-    bool ConnectionManager::handle_handshake(const HandshakePacket& packet) {
-        std::lock_guard<std::mutex> lock(mtx_);
-
-        if (packet.version != PROTOCOL_VERSION) {
-            std::cerr << "[Handshake] Version mismatch! Peer: " << packet.sender_id 
-                      << " uses v" << packet.version << std::endl;
+        // Магия DNS-резолвинга
+        DWORD dwRetval = getaddrinfo(host.c_str(), port_str.c_str(), &hints, &result);
+        if (dwRetval != 0) {
+            std::cerr << "[Network] DNS resolution failed for " << host << ". Error code: " << dwRetval << "\n";
             return false;
         }
 
-        PeerSession session;
-        session.id = packet.sender_id;
-        session.role = packet.sender_role;
-        session.is_authenticated = true; // Later: verify signature
-        session.last_seen = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        SOCKET connect_socket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+        if (connect_socket == INVALID_SOCKET) {
+            freeaddrinfo(result);
+            return false;
+        }
 
-        active_sessions_[packet.sender_id] = session;
+        std::cout << "[Network] Attempting to connect to Swarm at " << host << ":" << port << "...\n";
         
-        std::cout << "[Handshake] Peer " << packet.sender_id 
-                  << " authenticated as " << (session.role == NodeRole::Titan ? "TITAN" : "ARCHIVIST") 
-                  << std::endl;
-        
+        int connect_res = connect(connect_socket, result->ai_addr, (int)result->ai_addrlen);
+        if (connect_res == SOCKET_ERROR) {
+            std::cerr << "[Network] Failed to connect to seed.\n";
+            closesocket(connect_socket);
+            freeaddrinfo(result);
+            return false;
+        }
+
+        // Обязательно чистим память после успешного резолва
+        freeaddrinfo(result); 
+
+        std::lock_guard<std::mutex> lock(sockets_mtx_);
+        active_sockets_.push_back(connect_socket);
+        std::cout << "[Network] Successfully connected to Swarm via DNS!\n";
         return true;
+#else
+        return false;
+#endif
     }
-
-    bool ConnectionManager::is_peer_trusted(const PeerID& id) const {
-        std::lock_guard<std::mutex> lock(mtx_);
-        auto it = active_sessions_.find(id);
-        return (it != active_sessions_.end() && it->second.is_authenticated);
-    }
-
-    void ConnectionManager::evict_peer(const PeerID& id) {
-        std::lock_guard<std::mutex> lock(mtx_);
-        active_sessions_.erase(id);
-    }
-}
