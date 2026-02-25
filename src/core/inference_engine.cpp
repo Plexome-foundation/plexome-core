@@ -3,6 +3,9 @@
 #include <thread>
 #include <chrono>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 // Include the actual llama.cpp library header
 #include "llama.h"
@@ -11,13 +14,12 @@ namespace plexome {
 
 class LlamaEngine : public InferenceEngine {
 public:
-    LlamaEngine() : model_(nullptr), ctx_(nullptr), vocab_(nullptr), is_loaded_(false) {
+    LlamaEngine() : model_(nullptr), vocab_(nullptr), is_loaded_(false), active_contexts_(0) {
         // Initialize backend (CPU/GPU)
         llama_backend_init(); 
     }
 
     ~LlamaEngine() {
-        if (ctx_) llama_free(ctx_);
         if (model_) llama_free_model(model_);
         llama_backend_free();
     }
@@ -41,37 +43,54 @@ public:
             return false;
         }
 
-        llama_context_params ctx_params = llama_context_default_params();
-        ctx_params.n_ctx = 2048; // Context window size
-        
-        ctx_ = llama_new_context_with_model(model_, ctx_params);
-        if (!ctx_) {
-            std::cerr << "[AI Core] CRITICAL: Failed to allocate context." << std::endl;
-            return false;
-        }
+        // --- CONCURRENCY LIMITS ---
+        // A single context of 2048 tokens takes roughly ~100-150MB of RAM.
+        // We set a safe limit here. In the future, this can be calculated dynamically 
+        // based on total physical RAM minus the model weight size.
+        max_concurrent_contexts_ = 4; 
 
         model_path_ = path;
         is_loaded_ = true;
-        std::cout << "[AI Core] Engine online. Model ready for inference!" << std::endl;
+        std::cout << "[AI Core] Engine online. Thread pool capacity: " << max_concurrent_contexts_ << " parallel requests." << std::endl;
         return true;
     }
 
     std::string predict(const std::string& prompt) override {
         if (!is_loaded_ || !model_ || !vocab_) return "Error: Model is not initialized.";
 
-        std::cout << "[Local AI]: [AI Core] Tokenizing prompt..." << std::endl;
+        // ==========================================
+        // 1. DYNAMIC QUEUE & SLOT RESERVATION
+        // ==========================================
+        std::unique_lock<std::mutex> lock(queue_mutex_);
+        if (active_contexts_ >= max_concurrent_contexts_) {
+            std::cout << "\n[Swarm Queue] Node is fully loaded (" << active_contexts_ << "/" 
+                      << max_concurrent_contexts_ << "). Request queued..." << std::endl;
+        }
+        
+        // Wait until a slot frees up
+        queue_cv_.wait(lock, [this]() { return active_contexts_ < max_concurrent_contexts_; });
+        
+        // Reserve slot
+        active_contexts_++;
+        lock.unlock(); // Release lock immediately so other threads can join the queue!
 
-        // BULLETPROOF CACHE CLEARING
-        // Completely recreate the context for each new request (takes milliseconds).
-        // This 100% protects us from any llama.cpp API changes in the future.
-        if (ctx_) {
-            llama_free(ctx_);
-            llama_context_params ctx_params = llama_context_default_params();
-            ctx_params.n_ctx = 2048;
-            ctx_ = llama_new_context_with_model(model_, ctx_params);
+        // ==========================================
+        // 2. THREAD-LOCAL CONTEXT ALLOCATION
+        // ==========================================
+        // We create a fresh, isolated KV cache for this specific thread.
+        // It shares the heavy read-only 'model_' safely.
+        llama_context_params ctx_params = llama_context_default_params();
+        ctx_params.n_ctx = 2048; 
+        llama_context* local_ctx = llama_new_context_with_model(model_, ctx_params);
+
+        if (!local_ctx) {
+            release_slot();
+            return "Error: Failed to allocate thread-local context (Out of Memory?).";
         }
 
-        // Format the prompt for Phi-3 model
+        // ==========================================
+        // 3. INFERENCE PROCESS
+        // ==========================================
         std::string formatted_prompt = "<|user|>\n" + prompt + "<|end|>\n<|assistant|>\n";
 
         std::vector<llama_token> tokens(formatted_prompt.size() + 4);
@@ -82,9 +101,12 @@ public:
         }
         tokens.resize(n_tokens);
 
-        if (n_tokens > 2000) return "Error: Prompt is too long.";
+        if (n_tokens > 2000) {
+            llama_free(local_ctx);
+            release_slot();
+            return "Error: Prompt is too long.";
+        }
 
-        // Safe memory allocation for the batch
         llama_batch batch = llama_batch_init(2048, 0, 1);
         batch.n_tokens = n_tokens;
 
@@ -93,30 +115,28 @@ public:
             batch.pos[i] = i;
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
-            batch.logits[i] = (i == n_tokens - 1) ? 1 : 0; // Request logits ONLY for the last token
+            batch.logits[i] = (i == n_tokens - 1) ? 1 : 0; 
         }
 
-        if (llama_decode(ctx_, batch)) {
+        if (llama_decode(local_ctx, batch)) {
             llama_batch_free(batch);
+            llama_free(local_ctx);
+            release_slot();
             return "Error: Failed to decode prompt.";
         }
 
-        std::cout << "[AI Core] Generating response:\n>> ";
-
         std::string result = "";
         int n_cur = n_tokens;
-        int n_predict = 512; // Maximum response length
+        int n_predict = 512; 
         const int n_vocab = llama_n_vocab(vocab_);
 
         for (int i = 0; i < n_predict; i++) {
-            // Get probabilities for the next word
-            float* logits = llama_get_logits_ith(ctx_, batch.n_tokens - 1);
+            float* logits = llama_get_logits_ith(local_ctx, batch.n_tokens - 1);
             if (!logits) {
                 result += "\n[Engine Error: Logits pointer is null]";
                 break;
             }
             
-            // Greedy Decoding - choose the most probable word
             llama_token new_token_id = 0;
             float max_logit = -1e9f;
             for (int v = 0; v < n_vocab; v++) {
@@ -126,32 +146,24 @@ public:
                 }
             }
 
-            // === SMART STOP ===
-            // Check modern End of Generation flag or classic EOS
-            if (llama_token_is_eog(vocab_, new_token_id) || new_token_id == llama_token_eos(vocab_)) {
-                break;
-            }
+            if (llama_token_is_eog(vocab_, new_token_id) || new_token_id == llama_token_eos(vocab_)) break;
 
-            // Convert token to text
             char buf[128] = {0};
-            // Enable special character output to catch them as text if flags didn't work
             int n = llama_token_to_piece(vocab_, new_token_id, buf, sizeof(buf), 0, true); 
             if (n > 0) {
                 std::string piece(buf, n);
-                
-                // Hard interception of Phi-3 tags
                 if (piece.find("<|end|>") != std::string::npos || 
                     piece.find("<|user|>") != std::string::npos ||
                     piece.find("<|assistant|>") != std::string::npos) {
                     break;
                 }
-
                 result += piece;
-                // REAL-TIME OUTPUT (Typewriter effect)
+                
+                // Print directly to console (might overlap visually if multiple threads print at once, 
+                // but the returned string 'result' will be perfectly clean for the network to send back).
                 std::cout << piece << std::flush;
             }
 
-            // Prepare batch for the next step
             batch.n_tokens = 1;
             batch.token[0] = new_token_id;
             batch.pos[0] = n_cur;
@@ -159,17 +171,19 @@ public:
             batch.seq_id[0][0] = 0;
             batch.logits[0] = 1; 
 
-            // Feed the generated word back into the model
-            if (llama_decode(ctx_, batch)) {
-                result += "\n[Engine Error: Decode loop failed]";
-                break;
-            }
+            if (llama_decode(local_ctx, batch)) break;
             
             n_cur += 1;
         }
 
-        std::cout << "\n"; // Newline after response completion
+        // ==========================================
+        // 4. CLEANUP & RELEASE SLOT
+        // ==========================================
+        std::cout << "\n"; 
         llama_batch_free(batch);
+        llama_free(local_ctx); // Destroy the thread-local context to free up memory
+        
+        release_slot(); // Notify the queue that a slot is open
         return result;
     }
 
@@ -180,11 +194,24 @@ public:
     bool is_loaded() const override { return is_loaded_; }
 
 private:
+    // Helper function to safely decrement the active counter and wake up waiting threads
+    void release_slot() {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        active_contexts_--;
+        queue_cv_.notify_one(); 
+    }
+
+    // Heavy, Read-Only Model (Shared across all threads)
     llama_model* model_;
-    llama_context* ctx_;
     const llama_vocab* vocab_; 
     std::string model_path_;
     bool is_loaded_;
+    
+    // Concurrency Controls (The Semaphore Pattern)
+    int max_concurrent_contexts_;
+    std::atomic<int> active_contexts_;
+    std::mutex queue_mutex_;
+    std::condition_variable queue_cv_;
 };
 
 std::unique_ptr<InferenceEngine> InferenceEngine::create() {
