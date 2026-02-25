@@ -47,4 +47,28 @@ namespace plexome {
         uint32_t layer_index;
         uint64_t version_epoch;
     };
+
+    // ====================================================================
+    // V2.0 ADDITIONS: Knowledge Injection, Benchmarking & Core Config
+    // ====================================================================
+
+    enum class PerformanceTier {
+        Potato,   // Low-end/Legacy
+        Standard, // Modern PC
+        Titan     // Enterprise/High-end GPU
+    };
+
+    struct KnowledgePacket {
+        std::string source_name;
+        std::string data;
+        uint64_t timestamp;
+    };
+
+    struct AppConfig {
+        uint16_t port = DEFAULT_PORT;
+        bool is_seed = false;
+        std::string storage_path = "./data";
+        uint64_t vram_limit_bytes = 0;
+        uint64_t ram_limit_bytes = 0;
+    };
 }
