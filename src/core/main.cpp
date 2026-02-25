@@ -1,94 +1,89 @@
-#include "node.h"
-#include "plexome_types.h"
+#include <windows.h>
 #include <iostream>
 #include <string>
+#include <vector>
 #include <csignal>
+#include "../../include/module_interface.h"
 
-#ifdef _WIN32
-    #ifndef WIN32_LEAN_AND_MEAN
-        #define WIN32_LEAN_AND_MEAN
-    #endif
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
-#endif
+// Structure to track loaded modules
+struct ModuleInstance {
+    HMODULE handle;
+    std::string name;
+    PXM_SHUTDOWN_FUNC shutdown;
+};
 
-// Глобальный указатель для корректного завершения по Ctrl+C
-plexome::Node* g_node_ptr = nullptr;
+std::vector<ModuleInstance> loaded_modules;
+bool should_exit = false;
 
+// Signal handler for clean exit
 void signal_handler(int signal) {
-    if (g_node_ptr) {
-        std::cout << "\n[System] Shutdown signal received. Cleaning up..." << std::endl;
-        g_node_ptr->stop();
-    }
+    std::cout << "\n[Host] Shutdown signal received (" << signal << ")." << std::endl;
+    should_exit = true;
 }
 
-int main(int argc, char* argv[]) {
-    // 1. Инициализация сетевого стека Windows
-#ifdef _WIN32
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "[Fatal] Winsock initialization failed." << std::endl;
-        return 1;
+// Helper to load a DLL and pass global config
+bool LoadPlexomeModule(const std::string& dll_name, bool is_seed) {
+    HMODULE hMod = LoadLibraryA(dll_name.c_str());
+    if (!hMod) {
+        std::cerr << "[Host] Failed to load " << dll_name << " | Error: " << GetLastError() << std::endl;
+        return false;
     }
-#endif
 
-    // 2. Настройка конфигурации
-    plexome::AppConfig config;
-    config.port = 7539;
-    config.seed_host = "seed1.plexome.ai";
-    config.storage_path = "./data";
+    auto get_info = (PXM_GET_INFO_FUNC)GetProcAddress(hMod, "pxm_get_info");
+    auto init = (PXM_INIT_FUNC)GetProcAddress(hMod, "pxm_init");
+    auto shutdown = (PXM_SHUTDOWN_FUNC)GetProcAddress(hMod, "pxm_shutdown");
 
-    // Базовые настройки для клиента (PEER)
-    config.is_seed = false; 
-    config.node_id = "PXM-WORKER";
-
-    // 3. ПЕРЕХВАТ КОМАНДНОЙ СТРОКИ
-    // Проверяем, не запустили ли нас с флагом --seed
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--seed") {
-            config.is_seed = true;
-            config.node_id = "PXM-SEED-SERVER";
+    if (get_info && init) {
+        ModuleInfo info = get_info();
+        std::cout << "[Host] Loaded: " << info.name << " v" << info.version << " (Role: " << (is_seed ? "SEED" : "PEER") << ")" << std::endl;
+        
+        // We pass the role to the module during initialization
+        if (init(is_seed)) {
+            loaded_modules.push_back({hMod, info.name, shutdown});
+            return true;
         }
     }
 
-    // Если ты не умеешь/не хочешь запускать программу через консоль с аргументами,
-    // и просто кликаешь по .exe на сервере, раскомментируй строку ниже перед сборкой:
-    // config.is_seed = true;
+    FreeLibrary(hMod);
+    return false;
+}
 
-    // Выводим в консоль, кем мы в итоге стали
-    if (config.is_seed) {
-        std::cout << "========================================\n";
-        std::cout << "[System] LAUNCHING AS SEED (SERVER)\n";
-        std::cout << "========================================\n";
-    } else {
-        std::cout << "========================================\n";
-        std::cout << "[System] LAUNCHING AS PEER (CLIENT)\n";
-        std::cout << "========================================\n";
+int main(int argc, char* argv[]) {
+    // 1. Windows Network Setup (Global for the process)
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        return 1;
     }
 
-    try {
-        // 4. Создание и запуск ноды
-        plexome::Node node(config);
-        g_node_ptr = &node;
-
-        // Регистрация обработчиков сигналов
-        std::signal(SIGINT, signal_handler);
-        std::signal(SIGTERM, signal_handler);
-
-        node.init();
-        node.run(); // Этот вызов заблокирует поток до выхода из программы
-
-    } catch (const std::exception& e) {
-        std::cerr << "[Fatal Error] " << e.what() << std::endl;
+    // 2. Parse command line (determine Node identity)
+    bool is_seed = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--seed") is_seed = true;
     }
 
-    // 5. Очистка перед выходом
-#ifdef _WIN32
+    std::cout << "=== PLEXOME MODULAR HOST (2026) ===" << std::endl;
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    // 3. Dynamic Loading of blocks
+    // In our new architecture, we load the AI core and Network stack as independent DLLs
+    LoadPlexomeModule("pxm_ai.dll", is_seed);
+    LoadPlexomeModule("pxm_network.dll", is_seed);
+
+    // 4. Main Host Loop
+    std::cout << "[Host] Running. Press Ctrl+C to terminate." << std::endl;
+    while (!should_exit) {
+        Sleep(200); // Low CPU usage for orchestrator
+    }
+
+    // 5. Cleanup (Unloading blocks)
+    std::cout << "[Host] Cleaning up modules..." << std::endl;
+    for (auto& mod : loaded_modules) {
+        if (mod.shutdown) mod.shutdown();
+        FreeLibrary(mod.handle);
+    }
+
     WSACleanup();
-#endif
-    
-    std::cout << "[System] Plexome Node exit success." << std::endl;
+    std::cout << "[Host] Plexome Exit Success." << std::endl;
     return 0;
 }
