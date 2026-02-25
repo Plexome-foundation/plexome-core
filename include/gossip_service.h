@@ -1,27 +1,23 @@
 #pragma once
 #include "plexome_types.h"
-#include <set>
-#include <string>
-#include <mutex>
+#include <vector>
 
 namespace plexome {
 
-    /**
-     * Epidemic protocol for state propagation.
-     * Ensures all nodes eventually receive network-wide updates.
-     */
     class GossipService {
     public:
-        GossipService();
+        GossipService() = default;
 
-        // Register a message as "seen" to prevent infinite loops
-        bool process_message(const std::string& message_id);
+        // Starts the background peer discovery process
+        void start_gossip_protocol();
 
-        // Select random peers to forward the message to
-        std::vector<PeerID> select_targets(const std::vector<PeerID>& available_peers, size_t fanout = 3);
+        // Safely stops the gossip background tasks
+        void stop_gossip_protocol();
+
+        // Selects a random subset of peers for the next gossip round
+        std::vector<PeerID> get_random_peers(size_t count, const std::vector<PeerID>& all_known_peers);
 
     private:
-        std::set<std::string> seen_messages_;
-        mutable std::mutex mtx_;
+        bool is_running_ = false;
     };
 }
