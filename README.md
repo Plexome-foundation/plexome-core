@@ -1,20 +1,36 @@
-# PLEXOME Architecture: The Storage-First AI
+# 🧬 PLEXOME FOUNDATION | Swarm AI Node v2.0
 
-## 1. Design Philosophy
-Unlike typical LLM deployments, PLEXOME treats neural network weights as a **Distributed Logical Volume**. We focus on high-availability, low-latency weight streaming, and federated intelligence.
+**Plexome** is a decentralized, peer-to-peer AI network designed for distributed inference and federated learning. By applying **Enterprise Storage Principles (AI-RAID)** to neural networks, Plexome allows a swarm of standard computers to function as a single, massive virtual supercomputer.
 
-## 2. P.S.B. (Plexome Storage Bus)
-The core transport layer.
-* **Sharding:** Models are split into 4MB - 8MB blocks (Pages).
-* **Direct Access:** Nodes use memory-mapped files (mmap) to access local caches.
-* **QUIC Protocol:** All inter-node communication happens over encrypted UDP/QUIC to handle packet loss and jitter in consumer internet connections.
 
-## 3. Memory Tiering (L1/L2/L3)
-* **L1 (VRAM/Hot):** Active attention layers for immediate compute.
-* **L2 (Local RAM/Warm):** Prefetched layers stored in system memory.
-* **L3 (Network/Cold):** Weights stored on peer nodes across the global fabric.
 
-## 4. Federated Evolution
-Weights are updated via asynchronous LoRA training.
-* **Validation:** Nodes perform "Proof-of-Logic" checks on merged weights.
-* **Consensus:** Only updates with high fitness scores are merged into the global model state.
+## 🚀 Key Features (v2.0 Pro)
+
+* **AI-RAID (Pipeline Parallelism):** Just like RAID-0 stripes data across disks, Plexome stripes LLM layers across nodes. If a model (e.g., 70B parameters) is too large for one GPU, the swarm splits the layers across multiple participants.
+* **Hardware Benchmarking (PlexoParrots):** An integrated 2-second stress test evaluates node performance upon startup. The system automatically assigns a tier: **Potato**, **Standard**, or **Titan**.
+* **Federated LoRA Injection:** Nodes can learn specialized technical data (e.g., HPE 3PAR, Primera, Alletra documentation) locally. These "knowledge deltas" (LoRA) are then synchronized across the swarm without sharing raw data.
+* **Swarm Routing:** Intelligent tensor routing via port **7539**. Computation results travel through the pipeline with low latency using an optimized P2P bus.
+* **Cross-Platform Core:** Native C++20 implementation for Windows (Winsock2) and Linux, featuring graceful shutdown and static linking capabilities.
+
+## 🛠 Quick Start (Windows)
+
+### Prerequisites
+* Visual Studio 2022 (with "Desktop development with C++" and "CMake tools").
+* At least 8GB of RAM (16GB+ recommended for Titan nodes).
+
+### Build Instructions
+1.  **Clone the Repo:** Open Visual Studio -> Clone a Repository -> `https://github.com/your-repo/plexome`.
+2.  **Configure:** Wait for CMake to finish generating the cache.
+3.  **Build:** Set configuration to `x64-Release` and press `Ctrl+Shift+B`.
+4.  **Download Models:**
+    ```powershell
+    .\scripts\download_models.ps1
+    ```
+
+### Configuration (`plexome.conf`)
+Ensure your config file is in the same directory as the `.exe`:
+```ini
+port=7539
+is_seed=false
+vram_limit_gb=8
+storage_path=./data
