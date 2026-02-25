@@ -7,11 +7,9 @@
 ## 🚀 The Vision: V2.0 Modular Architecture
 The system has transitioned from a monolithic design to a **Modular Plugin Architecture**. This allows the network to update its core components (AI logic or Network stack) on-the-fly without restarting the node.
 
-
-
 ### Core Components:
 * **plexome_host.exe (The Orchestrator):** A lightweight dispatcher that manages module lifecycles and routes tasks between blocks.
-* **pxm_ai.dll (The Brain):** Multithreaded LLM engine based on `llama.cpp`. Optimized for **Phi-3-mini** with parallel context pooling and smart stop-token handling.
+* **pxm_ai.dll (The Brain):** Multithreaded LLM engine based on `llama.cpp`. Optimized for Phi-3-mini with parallel context pooling and smart stop-token handling.
 * **pxm_network.dll (The Senses):** Decentralized P2P stack using a custom Swarm protocol for real-time model synchronization and weight exchange.
 
 ---
@@ -20,8 +18,6 @@ The system has transitioned from a monolithic design to a **Modular Plugin Archi
 * **Performance Tiers:** Nodes automatically categorize themselves as **Potato**, **Standard**, or **Titan** (Queen) based on hardware benchmarks.
 * **Decentralized Federated Learning:** Nodes scan web data, generate 50MB LoRA adapters, and submit them for consensus-based merging.
 * **Hallucination Protection:** The "Council of Queens" verifies training results through weight-vector similarity checks before committing to the global model.
-
-
 
 ---
 
