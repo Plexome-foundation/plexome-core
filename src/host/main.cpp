@@ -11,15 +11,25 @@
 class PxmModuleLoader {
 public:
     static void* load(const std::string& name) {
-        std::string full_path;
+    std::string full_path;
 #ifdef PXM_PLATFORM_WINDOWS
-        full_path = name + ".dll";
-        return LoadLibraryA(full_path.c_str());
-#else
-        full_path = "./lib" + name + ".so";
-        return dlopen(full_path.c_str(), RTLD_NOW);
-#endif
+    // Получаем путь к папке, где лежит сам EXE
+    char buffer[MAX_PATH];
+    GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    std::filesystem::path exe_path = std::filesystem::path(buffer).parent_path();
+    
+    full_path = (exe_path / (name + ".dll")).string();
+    
+    void* handle = LoadLibraryA(full_path.c_str());
+    if (!handle) {
+        std::cerr << "[Host] Error code: " << GetLastError() << " for path: " << full_path << std::endl;
     }
+    return handle;
+#else
+    full_path = "./" + name + ".so"; // Для Linux/Mac
+    return dlopen(full_path.c_str(), RTLD_NOW);
+#endif
+}
 
     static void* get_proc(void* handle, const std::string& func_name) {
 #ifdef PXM_PLATFORM_WINDOWS
