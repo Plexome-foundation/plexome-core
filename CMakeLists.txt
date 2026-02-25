@@ -19,6 +19,10 @@ find_package(Threads REQUIRED)
 # 2. Include directory
 include_directories(include)
 
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "Disable llama tests") # чтобы не собирать лишний мусор
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "Disable llama examples")
+add_subdirectory(llama.cpp)
+
 # 3. Source File Registry
 set(SOURCES
     src/core/main.cpp
