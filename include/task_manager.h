@@ -1,48 +1,32 @@
 #pragma once
 #include "plexome_types.h"
-#include <string>
 #include <vector>
-#include <queue>
+#include <string>
 #include <mutex>
+#include <optional>
 
 namespace plexome {
 
-    /**
-     * Represents a computation unit (Inference or Training step)
-     */
     struct Task {
         std::string task_id;
-        ShardID target_shard;
-        std::vector<float> input_data;
-        uint64_t priority;
-        uint64_t timestamp;
+        std::string payload;
+        bool is_completed = false;
     };
 
-    /**
-     * Handles the Pull-model queue for the node.
-     * Nodes pull tasks based on their available VRAM and Role.
-     */
     class TaskManager {
     public:
-        TaskManager();
+        TaskManager() = default;
 
-        // Add a task to the local queue (pulled from network)
-        void push_task(const Task& task);
+        // Adds a new computation task to the swarm queue
+        void push_task(const std::string& id, const std::string& data);
 
-        // Fetch the next high-priority task for processing
+        // Safely retrieves the next available task
         std::optional<Task> pull_next_task();
 
-        size_t pending_count() const;
+        size_t get_queue_size();
 
     private:
-        // Priority queue to handle tasks by urgency
-        struct TaskComparator {
-            bool operator()(const Task& a, const Task& b) {
-                return a.priority < b.priority;
-            }
-        };
-
-        std::priority_queue<Task, std::vector<Task>, TaskComparator> queue_;
-        mutable std::mutex mtx_;
+        std::vector<Task> queue_;
+        std::mutex mtx_;
     };
 }
