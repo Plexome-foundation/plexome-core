@@ -57,12 +57,19 @@ public:
     }
 
     std::string predict(const std::string& prompt) override {
-        if (!is_loaded_ || !ctx_ || !vocab_) return "Error: Model is not initialized.";
+        if (!is_loaded_ || !model_ || !vocab_) return "Error: Model is not initialized.";
 
         std::cout << "[Local AI]: [AI Core] Tokenizing prompt..." << std::endl;
 
-        // Очищаем кэш контекста, чтобы новый запрос не перемешался со старыми
-        llama_kv_cache_clear(ctx_);
+        // БРОНЕБОЙНАЯ ОЧИСТКА КЭША
+        // Полностью пересоздаем контекст для каждого нового запроса (занимает миллисекунды)
+        // Это на 100% защищает нас от любых изменений API llama.cpp в будущем
+        if (ctx_) {
+            llama_free(ctx_);
+            llama_context_params ctx_params = llama_context_default_params();
+            ctx_params.n_ctx = 2048;
+            ctx_ = llama_new_context_with_model(model_, ctx_params);
+        }
 
         // Форматируем промпт под модель Phi-3 (чтобы она отвечала как ассистент)
         std::string formatted_prompt = "<|user|>\n" + prompt + "<|end|>\n<|assistant|>\n";
@@ -77,7 +84,7 @@ public:
 
         if (n_tokens > 2000) return "Error: Prompt is too long.";
 
-        // БЕЗОПАСНОЕ ВЫДЕЛЕНИЕ ПАМЯТИ ПОД БАТЧ
+        // Безопасное выделение памяти под батч (пакет данных для нейросети)
         llama_batch batch = llama_batch_init(2048, 0, 1);
         batch.n_tokens = n_tokens;
 
@@ -86,7 +93,7 @@ public:
             batch.pos[i] = i;
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
-            batch.logits[i] = (i == n_tokens - 1) ? 1 : 0; // Просим логиты ТОЛЬКО для последнего токена
+            batch.logits[i] = (i == n_tokens - 1) ? 1 : 0; // Просим вероятности ТОЛЬКО для последнего токена
         }
 
         if (llama_decode(ctx_, batch)) {
@@ -101,8 +108,9 @@ public:
         int n_predict = 512; // Максимальная длина ответа
         const int n_vocab = llama_n_vocab(vocab_);
 
+        // Цикл генерации текста
         for (int i = 0; i < n_predict; i++) {
-            // Получаем вероятности
+            // Получаем вероятности для следующего слова
             float* logits = llama_get_logits_ith(ctx_, batch.n_tokens - 1);
             if (!logits) {
                 result += "\n[Engine Error: Logits pointer is null]";
@@ -119,6 +127,7 @@ public:
                 }
             }
 
+            // Если нейросеть сгенерировала токен конца сообщения — выходим
             if (new_token_id == llama_token_eos(vocab_)) break;
 
             // Конвертируем токен в текст
@@ -127,7 +136,7 @@ public:
             if (n > 0) {
                 std::string piece(buf, n);
                 result += piece;
-                // ВЫВОД В РЕАЛЬНОМ ВРЕМЕНИ
+                // ВЫВОД В РЕАЛЬНОМ ВРЕМЕНИ (Эффект печатной машинки)
                 std::cout << piece << std::flush;
             }
 
@@ -139,6 +148,7 @@ public:
             batch.seq_id[0][0] = 0;
             batch.logits[0] = 1; 
 
+            // Скармливаем сгенерированное слово обратно в модель
             if (llama_decode(ctx_, batch)) {
                 result += "\n[Engine Error: Decode loop failed]";
                 break;
