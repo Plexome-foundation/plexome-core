@@ -74,7 +74,13 @@ int main(int argc, char* argv[]) {
     config.work_dir = "./";
 
     // 2. Define modules to load according to architecture
-    std::vector<std::string> module_names = { "pxm_ai", "pxm_network", "pxm_topology", "pxm_sharder" };
+    std::vector<std::string> module_names = { 
+    "pxm_ai", 
+    "pxm_network", 
+    "pxm_topology", 
+    "pxm_sharder", 
+    "pxm_updater" 
+};
     std::map<std::string, void*> loaded_modules;
 
     // 3. Loading & Initialization Cycle
