@@ -11,28 +11,17 @@
 namespace plexome {
 
 Node::Node(const AppConfig& config) 
-    : config_(config), 
-      is_running_(false) {
-    
+    : config_(config), is_running_(false) {
     conn_manager_ = std::make_unique<ConnectionManager>();
     knowledge_ = std::make_unique<KnowledgeManager>(config_.storage_path);
     engine_ = InferenceEngine::create(); 
 }
 
-Node::~Node() {
-    stop();
-}
+Node::~Node() { stop(); }
 
 void Node::init() {
     std::cout << "[System] Node ID: " << config_.node_id << " Starting..." << std::endl;
-
-    if (!std::filesystem::exists(config_.storage_path)) {
-        std::filesystem::create_directories(config_.storage_path);
-    }
-    
-    if (!std::filesystem::exists("./models")) {
-        std::filesystem::create_directories("./models");
-    }
+    if (!std::filesystem::exists("./models")) std::filesystem::create_directories("./models");
 
     for (const auto& entry : std::filesystem::directory_iterator("./models")) {
         if (entry.path().extension() == ".gguf") {
@@ -48,26 +37,12 @@ void Node::run() {
     is_running_ = true;
 
     if (config_.is_seed) {
-        if (!conn_manager_->start_server(static_cast<int>(config_.port))) {
-            std::cerr << "[Network] CRITICAL: Port " << config_.port << " is busy!" << std::endl;
-            is_running_ = false;
-            return;
-        }
+        conn_manager_->start_server(static_cast<int>(config_.port));
     } else {
         std::cout << "[Network] Looking for swarm via " << config_.seed_host << "..." << std::endl;
-        
-        bool connected = false;
         for(int i = 0; i < 5; ++i) {
-            if (conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) {
-                connected = true;
-                break;
-            }
-            std::cout << "[Network] Seed not ready, retrying in 2s... (" << i+1 << "/5)" << std::endl;
+            if (conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) break;
             std::this_thread::sleep_for(std::chrono::seconds(2));
-        }
-
-        if (!connected) {
-            std::cout << "[Network] Warning: No response from seed. Running in isolation." << std::endl;
         }
     }
 
@@ -75,10 +50,9 @@ void Node::run() {
     cli_thread.detach(); 
 
     while (is_running_) {
-        process_core_logic();
+        knowledge_->scan_new_data();
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
-    stop();
 }
 
 void Node::run_cli() {
@@ -86,48 +60,14 @@ void Node::run_cli() {
     while (is_running_) {
         std::cout << "pxm> " << std::flush;
         if (!std::getline(std::cin, input)) break;
-        if (input.empty()) continue;
-
-        if (input == "exit" || input == "quit") {
-            is_running_ = false;
-            break;
-        } 
-        else if (input == "help" || input == "?") {
-            std::cout << "\n--- Available Commands ---\n"
-                      << "  ask <prompt> : Send text to the AI model\n"
-                      << "  stats        : Show node identity and resources\n"
-                      << "  peers        : List active swarm connections\n"
-                      << "  ls           : Show current model info\n"
-                      << "  exit         : Shutdown node\n" << std::endl;
+        if (input == "exit") { is_running_ = false; break; }
+        if (input == "stats") {
+            std::cout << "ID: " << config_.node_id << " Peers: " << conn_manager_->get_active_peers_count() << std::endl;
         }
-        else if (input == "stats") {
-            std::cout << "\n--- Plexome Node Stats ---\n"
-                      << "  Node ID:   " << config_.node_id << "\n"
-                      << "  Role:      " << (config_.is_seed ? "SEED" : "PEER") << "\n"
-                      << "  Port:      " << config_.port << "\n"
-                      << "  Storage:   " << config_.storage_path << "\n"
-                      << "  Status:    ONLINE\n" << std::endl;
-        }
-        else if (input.rfind("ask ", 0) == 0) {
-            std::string prompt = input.substr(4);
-            std::cout << "[AI Core] Thinking..." << std::endl;
-            std::string response = engine_->predict(prompt);
-            std::cout << "\n[Response]: " << response << "\n" << std::endl;
-        }
-        else if (input == "peers") {
-            std::cout << "[Network] Connected peers: " << conn_manager_->get_active_peers_count() << std::endl;
-        }
-        else if (input == "ls") {
-             std::cout << "[AI Core] Engine active. Model loaded from ./models" << std::endl;
-        }
-        else {
-            std::cout << "Unknown command. Type 'help' for info." << std::endl;
+        if (input.rfind("ask ", 0) == 0) {
+            std::cout << engine_->predict(input.substr(4)) << std::endl;
         }
     }
-}
-
-void Node::process_core_logic() {
-    knowledge_->scan_new_data();
 }
 
 void Node::stop() {
