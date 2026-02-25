@@ -9,6 +9,7 @@ if(MSVC)
     # Принудительно используем статическую линковку (/MT вместо /MD)
     # Это сделает .exe независимым от Visual C++ Redistributable
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    add_compile_options(/Zc:char8_t-)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
