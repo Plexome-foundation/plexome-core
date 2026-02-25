@@ -1,23 +1,24 @@
 #pragma once
 #include "plexome_types.h"
-#include "knowledge_manager.h"
+#include "task_manager.h" // КРИТИЧНО: Добавлено для распознавания Task
+#include <vector>
+#include <string>
 #include <queue>
 
 namespace plexome {
 
-    /**
-     * Manages the Federated LoRA training process.
-     */
     class TrainingController {
     public:
-        // Converts raw text into structured training tasks for the swarm
-        void create_tasks_from_knowledge(const std::vector<KnowledgePacket>& packets);
+        TrainingController() = default;
 
-        // Submits a finished LoRA delta to the swarm
-        void broadcast_lora_delta(const std::vector<uint8_t>& delta_weights);
+        // Processes ingested manuals and converts them into training tasks
+        void create_tasks_from_knowledge(const std::vector<KnowledgePacket>& data_packets);
+
+        // Checks if the node is currently fine-tuning a local LoRA model
+        bool is_training_active() const;
 
     private:
-        // Internal queue of shards waiting to be trained
-        std::queue<Task> training_queue_;
+        std::queue<Task> task_queue_;
+        size_t active_tasks_count_ = 0;
     };
 }
