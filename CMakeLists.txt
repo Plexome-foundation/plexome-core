@@ -12,6 +12,9 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # 1. External Dependency: llama.cpp
 # We treat it as a subdirectory. It will produce its own libraries.
+if (MSVC)
+    add_compile_options(/Zc:char8_t-)
+endif()
 add_subdirectory(llama.cpp)
 
 # 2. Global Includes
