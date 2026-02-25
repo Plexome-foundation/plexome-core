@@ -1,7 +1,7 @@
 /**
- * PLEXOME FOUNDATION | Core Node Entry Point
- * Language: C++20
- * Platform: Windows (Primary) / Linux (Cross-platform)
+ * PLEXOME FOUNDATION | Universal Swarm Node v1.0
+ * Architecture: AI-RAID & Federated Learning
+ * Platform: Windows/Linux Cross-Platform
  */
 
 #ifdef _WIN32
@@ -26,85 +26,83 @@
 #include "bootstrap_manager.h"
 #include "connection_manager.h"
 #include "gossip_service.h"
+#include "knowledge_manager.h"
+#include "training_controller.h"
 
 #include <iostream>
 #include <thread>
 #include <chrono>
 #include <memory>
-#include <vector>
 #include <atomic>
+#include <string>
 
 class PlexomeNode {
 public:
     PlexomeNode(const std::string& config_path) {
-        // 1. Load configuration from file
+        // 1. Load Settings
         config_ = plexome::ConfigLoader::load_file(config_path);
 
-        // 2. Initialize Core Subsystems
+        // 2. Core Infrastructure
         stats_ = std::make_unique<plexome::StatsCollector>();
         cli_ = std::make_unique<plexome::CLIInterface>();
-        
-        // Storage and Memory (AI-RAID Layer)
         storage_ = std::make_unique<plexome::ShardStorage>(config_.storage_path);
-        mem_manager_ = std::make_unique<plexome::MemoryManager>(
-            config_.vram_limit_bytes, 
-            config_.ram_limit_bytes
-        );
+        mem_manager_ = std::make_unique<plexome::MemoryManager>(config_.vram_limit_bytes, config_.ram_limit_bytes);
 
-        // Network and Swarm Logic
+        // 3. Network & Swarm
         bootstrap_ = std::make_unique<plexome::BootstrapManager>(config_.is_seed);
         conn_manager_ = std::make_unique<plexome::ConnectionManager>();
         gossip_ = std::make_unique<plexome::GossipService>();
         task_manager_ = std::make_unique<plexome::TaskManager>();
         consensus_ = std::make_unique<plexome::ConsensusEngine>();
 
-        // AI Engine (llama.cpp integration)
+        // 4. AI & Knowledge (The "Brain")
         engine_ = plexome::EngineFactory::create_default();
-        
+        knowledge_ = std::make_unique<plexome::KnowledgeManager>("./knowledge");
+        training_ = std::make_unique<plexome::TrainingController>();
+
         is_running_ = true;
     }
 
     void start() {
-        std::cout << "[Plexome] Initializing Node Identity..." << std::endl;
+        std::cout << "[Plexome] Node Booting... Mode: " << (config_.is_seed ? "SEED/BASE" : "NORMAL") << std::endl;
         
-        // Set the active model in stats
-        stats_->set_current_model("DeepSeek-Coder-Plexome-v1");
+        // Load initial model for programming & storage expertise
+        if (engine_->load_model("./models/coder-1.3b.gguf")) {
+            stats_->set_current_model("Plexome-DeepSeek-HPE-v1");
+        }
 
-        // A. Startup Bootstrap (DNS Seeds discovery)
         bootstrap_->bootstrap();
 
-        // B. Launch Management Threads
+        // Threads: CLI Management and Web Dashboard Export
         std::thread cli_thread(&PlexomeNode::run_cli, this);
         std::thread web_thread(&PlexomeNode::run_web_exporter, this);
 
-        // C. Main Operation Loop (Pull Model logic)
-        std::cout << "[Plexome] Swarm Node is ACTIVE on port " << config_.port << std::endl;
-        
+        // Main Execution Loop
         while (is_running_) {
-            process_swarm_logic();
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            process_core_logic();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
 
         if (cli_thread.joinable()) cli_thread.join();
         if (web_thread.joinable()) web_thread.join();
     }
 
-    void stop() {
-        is_running_ = false;
-    }
+    void stop() { is_running_ = false; }
 
 private:
     plexome::AppConfig config_;
     std::atomic<bool> is_running_;
 
-    // Core Components
+    // Subsystems
     std::unique_ptr<plexome::StatsCollector> stats_;
     std::unique_ptr<plexome::CLIInterface> cli_;
     std::unique_ptr<plexome::InferenceEngine> engine_;
     std::unique_ptr<plexome::MemoryManager> mem_manager_;
     std::unique_ptr<plexome::ShardStorage> storage_;
+    std::unique_ptr<plexome::KnowledgeManager> knowledge_;
+    std::unique_ptr<plexome::TrainingController> training_;
     
-    // Networking Components
+    // Network
     std::unique_ptr<plexome::BootstrapManager> bootstrap_;
     std::unique_ptr<plexome::ConnectionManager> conn_manager_;
     std::unique_ptr<plexome::GossipService> gossip_;
@@ -113,55 +111,45 @@ private:
 
     void run_cli() {
         cli_->run_loop(*stats_);
-        stop(); // Shutdown node if CLI exits
+        stop();
     }
 
     void run_web_exporter() {
         while (is_running_) {
-            // Export the dashboard to a local HTML file
             plexome::WebUIExporter::export_dashboard(*stats_, "dashboard.html");
             std::this_thread::sleep_for(std::chrono::seconds(2));
         }
     }
 
-    void process_swarm_logic() {
-        // 1. Check for incoming tasks from the network (simulation)
-        auto task = task_manager_->pull_next_task();
-        if (task) {
-            std::cout << "[Core] Executing coding task: " << task->task_id << std::endl;
-            
-            // 2. Perform AI Inference
-            std::string result = engine_->predict("Analyze code integrity for: " + task->task_id);
-            
-            // 3. Submit for Majority Vote
-            consensus_->submit_result(task->task_id, {1.0f, 0.0f}); // Placeholder for actual tensor output
-            
-            stats_->report_task_complete();
+    void process_core_logic() {
+        // 1. KNOWLEDGE SCAN: Look for new 3PAR/Alletra manuals
+        auto new_data = knowledge_->scan_new_data();
+        if (!new_data.empty()) {
+            std::cout << "[Knowledge] Injecting " << new_data.size() << " blocks into training queue." << std::endl;
+            training_->create_tasks_from_knowledge(new_data);
         }
 
-        // 4. Handle Gossip propagation (Spread the news)
-        // gossip_->select_targets(...);
+        // 2. SWARM TASKS: Pull and execute computation
+        auto task = task_manager_->pull_next_task();
+        if (task) {
+            std::string result = engine_->predict("Technical Query: " + task->task_id);
+            consensus_->submit_result(task->task_id, {1.0f}); // Mock tensor result
+            stats_->report_task_complete();
+        }
     }
 };
 
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
-    // Windows-specific Socket Initialization (Winsock)
     WSADATA wsaData;
-    int wsa_result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (wsa_result != 0) {
-        std::cerr << "[Critical] Winsock initialization failed: " << wsa_result << std::endl;
-        return 1;
-    }
-    std::cout << "[System] Winsock initialized successfully." << std::endl;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return 1;
 #endif
 
     try {
-        // Start the Node using plexome.conf
         PlexomeNode node("plexome.conf");
         node.start();
     } catch (const std::exception& e) {
-        std::cerr << "[Fatal] Node crashed: " << e.what() << std::endl;
+        std::cerr << "[Fatal] " << e.what() << std::endl;
     }
 
 #ifdef _WIN32
