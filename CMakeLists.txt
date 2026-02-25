@@ -43,6 +43,9 @@ target_compile_definitions(pxm_updater PRIVATE PXM_EXPORT)
 add_library(pxm_bench SHARED modules/bench/pxm_bench.cpp)
 target_compile_definitions(pxm_bench PRIVATE PXM_EXPORT)
 
+add_library(pxm_security SHARED modules/security/pxm_security.cpp)
+target_compile_definitions(pxm_security PRIVATE PXM_EXPORT)
+
 # 4. Plexome Host (The Main Executable)
 add_executable(plexome_host src/host/main.cpp)
 
