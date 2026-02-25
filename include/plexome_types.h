@@ -65,8 +65,10 @@ namespace plexome {
     };
 
     struct AppConfig {
+        std::string node_id = "PXM-NODE-01"; // ДОБАВЛЕНО
         uint16_t port = DEFAULT_PORT;
         bool is_seed = false;
+        std::string seed_host = "seed1.plexome.ai"; // ДОБАВЛЕНО (для DNS)
         std::string storage_path = "./data";
         uint64_t vram_limit_bytes = 0;
         uint64_t ram_limit_bytes = 0;
