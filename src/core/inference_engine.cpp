@@ -4,7 +4,7 @@
 #include <chrono>
 #include <vector>
 
-// Подключаем заголовочный файл реальной библиотеки
+// Include the actual llama.cpp library header
 #include "llama.h"
 
 namespace plexome {
@@ -12,7 +12,7 @@ namespace plexome {
 class LlamaEngine : public InferenceEngine {
 public:
     LlamaEngine() : model_(nullptr), ctx_(nullptr), vocab_(nullptr), is_loaded_(false) {
-        // Инициализация бэкенда (CPU/GPU)
+        // Initialize backend (CPU/GPU)
         llama_backend_init(); 
     }
 
@@ -26,7 +26,7 @@ public:
         std::cout << "[AI Core] Loading GGUF weights into memory from: " << path << "..." << std::endl;
         
         llama_model_params model_params = llama_model_default_params();
-        // Раскомментируй строку ниже для ускорения на видеокарте (когда подключим CUDA/Vulkan)
+        // Uncomment the line below for GPU acceleration (once CUDA/Vulkan is configured)
         // model_params.n_gpu_layers = 99; 
         
         model_ = llama_load_model_from_file(path.c_str(), model_params);
@@ -42,7 +42,7 @@ public:
         }
 
         llama_context_params ctx_params = llama_context_default_params();
-        ctx_params.n_ctx = 2048; // Размер памяти модели (контекстное окно)
+        ctx_params.n_ctx = 2048; // Context window size
         
         ctx_ = llama_new_context_with_model(model_, ctx_params);
         if (!ctx_) {
@@ -61,9 +61,9 @@ public:
 
         std::cout << "[Local AI]: [AI Core] Tokenizing prompt..." << std::endl;
 
-        // БРОНЕБОЙНАЯ ОЧИСТКА КЭША
-        // Полностью пересоздаем контекст для каждого нового запроса (занимает миллисекунды)
-        // Это на 100% защищает нас от любых изменений API llama.cpp в будущем
+        // BULLETPROOF CACHE CLEARING
+        // Completely recreate the context for each new request (takes milliseconds).
+        // This 100% protects us from any llama.cpp API changes in the future.
         if (ctx_) {
             llama_free(ctx_);
             llama_context_params ctx_params = llama_context_default_params();
@@ -71,7 +71,7 @@ public:
             ctx_ = llama_new_context_with_model(model_, ctx_params);
         }
 
-        // Форматируем промпт под модель Phi-3 (чтобы она отвечала как ассистент)
+        // Format the prompt for Phi-3 model
         std::string formatted_prompt = "<|user|>\n" + prompt + "<|end|>\n<|assistant|>\n";
 
         std::vector<llama_token> tokens(formatted_prompt.size() + 4);
@@ -84,7 +84,7 @@ public:
 
         if (n_tokens > 2000) return "Error: Prompt is too long.";
 
-        // Безопасное выделение памяти под батч (пакет данных для нейросети)
+        // Safe memory allocation for the batch
         llama_batch batch = llama_batch_init(2048, 0, 1);
         batch.n_tokens = n_tokens;
 
@@ -93,7 +93,7 @@ public:
             batch.pos[i] = i;
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
-            batch.logits[i] = (i == n_tokens - 1) ? 1 : 0; // Просим вероятности ТОЛЬКО для последнего токена
+            batch.logits[i] = (i == n_tokens - 1) ? 1 : 0; // Request logits ONLY for the last token
         }
 
         if (llama_decode(ctx_, batch)) {
@@ -105,19 +105,18 @@ public:
 
         std::string result = "";
         int n_cur = n_tokens;
-        int n_predict = 512; // Максимальная длина ответа
+        int n_predict = 512; // Maximum response length
         const int n_vocab = llama_n_vocab(vocab_);
 
-        // Цикл генерации текста
         for (int i = 0; i < n_predict; i++) {
-            // Получаем вероятности для следующего слова
+            // Get probabilities for the next word
             float* logits = llama_get_logits_ith(ctx_, batch.n_tokens - 1);
             if (!logits) {
                 result += "\n[Engine Error: Logits pointer is null]";
                 break;
             }
             
-            // Жадный сэмплинг (Greedy Decoding) - выбираем самое вероятное слово
+            // Greedy Decoding - choose the most probable word
             llama_token new_token_id = 0;
             float max_logit = -1e9f;
             for (int v = 0; v < n_vocab; v++) {
@@ -127,20 +126,32 @@ public:
                 }
             }
 
-            // Если нейросеть сгенерировала токен конца сообщения — выходим
-            if (new_token_id == llama_token_eos(vocab_)) break;
+            // === SMART STOP ===
+            // Check modern End of Generation flag or classic EOS
+            if (llama_token_is_eog(vocab_, new_token_id) || new_token_id == llama_token_eos(vocab_)) {
+                break;
+            }
 
-            // Конвертируем токен в текст
+            // Convert token to text
             char buf[128] = {0};
-            int n = llama_token_to_piece(vocab_, new_token_id, buf, sizeof(buf), 0, false);
+            // Enable special character output to catch them as text if flags didn't work
+            int n = llama_token_to_piece(vocab_, new_token_id, buf, sizeof(buf), 0, true); 
             if (n > 0) {
                 std::string piece(buf, n);
+                
+                // Hard interception of Phi-3 tags
+                if (piece.find("<|end|>") != std::string::npos || 
+                    piece.find("<|user|>") != std::string::npos ||
+                    piece.find("<|assistant|>") != std::string::npos) {
+                    break;
+                }
+
                 result += piece;
-                // ВЫВОД В РЕАЛЬНОМ ВРЕМЕНИ (Эффект печатной машинки)
+                // REAL-TIME OUTPUT (Typewriter effect)
                 std::cout << piece << std::flush;
             }
 
-            // Готовим батч для следующего шага
+            // Prepare batch for the next step
             batch.n_tokens = 1;
             batch.token[0] = new_token_id;
             batch.pos[0] = n_cur;
@@ -148,7 +159,7 @@ public:
             batch.seq_id[0][0] = 0;
             batch.logits[0] = 1; 
 
-            // Скармливаем сгенерированное слово обратно в модель
+            // Feed the generated word back into the model
             if (llama_decode(ctx_, batch)) {
                 result += "\n[Engine Error: Decode loop failed]";
                 break;
@@ -157,7 +168,7 @@ public:
             n_cur += 1;
         }
 
-        std::cout << "\n"; // Отбивка после завершения ответа
+        std::cout << "\n"; // Newline after response completion
         llama_batch_free(batch);
         return result;
     }
