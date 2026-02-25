@@ -1,165 +1,124 @@
-/**
- * PLEXOME FOUNDATION | Universal Swarm Node v1.3 (Enterprise Tier)
- * Platform: Windows (Primary)
- */
-
-#ifdef _WIN32
-    #ifndef WIN32_LEAN_AND_MEAN
-        #define WIN32_LEAN_AND_MEAN
-    #endif
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
-#endif
-
-// Твои кастомные заголовки (убедись, что они созданы или закомментируй лишние)
+#include "node.h"
 #include "connection_manager.h"
 #include "knowledge_manager.h"
-// #include "inference_engine.h" // Раскомментируй, когда добавим llama.cpp
-
 #include <iostream>
-#include <thread>
-#include <atomic>
 #include <string>
+#include <thread>
+#include <chrono>
 #include <filesystem>
-#include <csignal>
-#include <mutex>
-#include <condition_variable>
-#include <vector>
-
-// Глобальное управление завершением
-std::atomic<bool> g_is_running{true};
-std::condition_variable g_shutdown_cv;
-std::mutex g_shutdown_mtx;
-
-void signal_handler(int signal) {
-    if (g_is_running) {
-        std::cout << "\n[System] Signal (" << signal << ") received. Shutting down..." << std::endl;
-        g_is_running = false;
-        g_shutdown_cv.notify_all();
-    }
-}
 
 namespace plexome {
-    // Временная структура конфига, если config_loader еще не готов
-    struct AppConfig {
-        std::string node_id = "PXM-NODE-01";
-        int port = 7539;
-        bool is_seed = false;
-        std::string seed_host = "seed1.plexome.ai";
-        std::string storage_path = "./storage";
-    };
+
+Node::Node(const AppConfig& config) 
+    : config_(config), 
+      is_running_(false) {
+    
+    // Инициализация Enterprise-компонентов
+    conn_manager_ = std::make_unique<ConnectionManager>();
+    knowledge_ = std::make_unique<KnowledgeManager>();
+    
+    // Здесь в будущем инициализируются остальные модули:
+    // stats_ = std::make_unique<StatsCollector>();
+    // task_manager_ = std::make_unique<TaskManager>();
 }
 
-class PlexomeNode {
-public:
-    PlexomeNode() {
-        // 1. Загрузка конфига (здесь можно вызвать твой ConfigLoader)
-        // config_ = plexome::ConfigLoader::load_file("plexome.conf");
+Node::~Node() {
+    stop();
+}
 
-        // 2. Инициализация сетевого и контентного движков
-        conn_manager_ = std::make_unique<plexome::ConnectionManager>();
-        knowledge_ = std::make_unique<plexome::KnowledgeManager>();
+void Node::init() {
+    std::cout << "[System] Initializing Plexome Enterprise Node..." << std::endl;
+    std::cout << "[System] Node ID: " << config_.node_id << " | Port: " << config_.port << std::endl;
+
+    // Проверка папок
+    if (!std::filesystem::exists("./knowledge")) {
+        std::filesystem::create_directory("./knowledge");
+    }
+}
+
+void Node::run() {
+    is_running_ = true;
+
+    // 1. СЕТЕВОЙ ЗАПУСК (DNS / SEED)
+    if (config_.is_seed) {
+        // Логика для Windows Server 2025
+        if (!conn_manager_->start_server(config_.port)) {
+            std::cerr << "[Network] Critical: Could not bind port " << config_.port << std::endl;
+            return;
+        }
+    } else {
+        // Логика для Windows 11 (Клиенты)
+        std::cout << "[Network] Joining Swarm via DNS: " << config_.seed_host << std::endl;
+        if (!conn_manager_->connect_to_seed(config_.seed_host, config_.port)) {
+            std::cout << "[Network] Seed unreachable. Standing by for incoming peers..." << std::endl;
+        }
+    }
+
+    // 2. ЗАПУСК CLI В ОТДЕЛЬНОМ ПОТОКЕ
+    // Это важно, чтобы основной цикл process_core_logic не зависел от ввода пользователя
+    std::thread cli_thread(&Node::run_cli, this);
+    cli_thread.detach(); 
+
+    // 3. ОСНОВНОЙ ОПЕРАЦИОННЫЙ ЦИКЛ (Event Loop)
+    std::cout << "[Core] Entering main operational loop." << std::endl;
+    
+    while (is_running_) {
+        process_core_logic();
         
-        std::cout << "[System] Infrastructure initialized. Role: " 
-                  << (config_.is_seed ? "SEED" : "PEER") << std::endl;
+        // Небольшая пауза, чтобы не выжирать 100% CPU в пустом цикле
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
-    void start() {
-        std::cout << "=========================================" << std::endl;
-        std::cout << "    PLEXOME FOUNDATION | NODE TERMINAL    " << std::endl;
-        std::cout << "=========================================" << std::endl;
+    stop();
+}
 
-        // A. Запуск сети
-        if (config_.is_seed) {
-            conn_manager_->start_server(config_.port);
-        } else {
-            std::cout << "[Network] Locating Swarm via DNS: " << config_.seed_host << std::endl;
-            conn_manager_->connect_to_seed(config_.seed_host, config_.port);
-        }
-
-        // B. Запуск потока CLI (чтобы не блокировать основной цикл)
-        std::thread cli_thread(&PlexomeNode::run_cli, this);
-        cli_thread.detach(); 
-
-        // C. Основной цикл операционной логики
-        std::cout << "[Core] Node is operational. Port: " << config_.port << std::endl;
+void Node::run_cli() {
+    std::string input;
+    while (is_running_) {
+        std::cout << "pxm> " << std::flush;
         
-        while (g_is_running) {
-            process_core_logic();
-            
-            // Ждем 200мс или сигнала завершения
-            std::unique_lock<std::mutex> lock(g_shutdown_mtx);
-            if (g_shutdown_cv.wait_for(lock, std::chrono::milliseconds(200), []{ return !g_is_running.load(); })) {
-                break;
-            }
+        if (!std::getline(std::cin, input)) break;
+        if (input.empty()) continue;
+
+        if (input == "exit" || input == "quit") {
+            std::cout << "[Core] Exit command received." << std::endl;
+            is_running_ = false;
+            break;
+        } 
+        else if (input == "peers") {
+            size_t count = conn_manager_->get_active_peers_count();
+            std::cout << "[Network] Connected peers: " << count << std::endl;
+        } 
+        else if (input == "stats") {
+            std::cout << "\n--- Node Stats ---\n"
+                      << "Role: " << (config_.is_seed ? "SEED (Server)" : "PEER (Client)") << "\n"
+                      << "Host: " << (config_.is_seed ? "localhost" : config_.seed_host) << "\n"
+                      << "ID:   " << config_.node_id << "\n\n";
         }
-
-        perform_shutdown();
-    }
-
-private:
-    plexome::AppConfig config_;
-    std::unique_ptr<plexome::ConnectionManager> conn_manager_;
-    std::unique_ptr<plexome::KnowledgeManager> knowledge_;
-
-    void run_cli() {
-        std::string input;
-        while (g_is_running) {
-            std::cout << "pxm> " << std::flush;
-            if (!std::getline(std::cin, input)) break;
-            if (input.empty()) continue;
-
-            if (input == "exit" || input == "quit") {
-                g_is_running = false;
-                g_shutdown_cv.notify_all();
-                break;
-            } else if (input == "peers") {
-                std::cout << "[Network] Active connections: " << conn_manager_->get_active_peers_count() << std::endl;
-            } else if (input == "help") {
-                std::cout << "Commands: peers, stats, exit" << std::endl;
-            } else {
-                std::cout << "Unknown command. Type 'help'." << std::endl;
-            }
+        else if (input == "help") {
+            std::cout << "\nCommands: peers, stats, exit, help\n" << std::endl;
+        }
+        else {
+            std::cout << "Unknown command. Type 'help'." << std::endl;
         }
     }
+}
 
-    void process_core_logic() {
-        // Здесь будет вызов Gossip, TaskManager и в будущем - Inference
-        // Пока просто проверяем новые файлы
-        // knowledge_->scan_knowledge_base("./knowledge");
+void Node::process_core_logic() {
+    // 1. Сканирование новых мануалов
+    // knowledge_->scan_new_data();
+    
+    // 2. Здесь будет Gossip протокол и обмен задачами
+}
+
+void Node::stop() {
+    if (is_running_) {
+        is_running_ = false;
     }
-
-    void perform_shutdown() {
-        std::cout << "[System] Closing sockets and saving state..." << std::endl;
+    if (conn_manager_) {
         conn_manager_->stop();
-        std::cout << "[System] Plexome Node terminated." << std::endl;
     }
-};
-
-int main(int argc, char* argv[]) {
-    // Регистрация сигналов для корректного выхода (Ctrl+C)
-    std::signal(SIGINT, signal_handler);  
-    std::signal(SIGTERM, signal_handler); 
-
-#ifdef _WIN32
-    // Инициализация сокетов Windows
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        std::cerr << "Winsock init failed" << std::endl;
-        return 1;
-    }
-#endif
-
-    try {
-        PlexomeNode node;
-        node.start();
-    } catch (const std::exception& e) { 
-        std::cerr << "[Fatal Error] " << e.what() << std::endl; 
-    }
-
-#ifdef _WIN32
-    WSACleanup();
-#endif
-    return 0;
+    std::cout << "[System] Graceful shutdown complete." << std::endl;
 }
+
+} // namespace plexome
