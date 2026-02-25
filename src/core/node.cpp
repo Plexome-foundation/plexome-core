@@ -20,7 +20,7 @@ Node::Node(const AppConfig& config)
 Node::~Node() { stop(); }
 
 void Node::init() {
-    std::cout << "[System] Node ID: " << config_.node_id << " Starting..." << std::endl;
+    std::cout << "[System] Initializing Node: " << config_.node_id << std::endl;
     if (!std::filesystem::exists("./models")) std::filesystem::create_directories("./models");
 
     for (const auto& entry : std::filesystem::directory_iterator("./models")) {
@@ -37,12 +37,14 @@ void Node::run() {
     is_running_ = true;
 
     if (config_.is_seed) {
-        conn_manager_->start_server(static_cast<int>(config_.port));
+        if (!conn_manager_->start_server(static_cast<int>(config_.port))) {
+            std::cerr << "[Network] Failed to start seed server!" << std::endl;
+        }
     } else {
-        std::cout << "[Network] Connecting to " << config_.seed_host << "..." << std::endl;
-        for(int i = 0; i < 5; ++i) {
+        std::cout << "[Network] Connecting to " << config_.seed_host << ":" << config_.port << "..." << std::endl;
+        for(int i = 0; i < 3; ++i) {
             if (conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) break;
-            std::cout << "[Network] Retrying... (" << i+1 << "/5)" << std::endl;
+            std::cout << "[Network] Retry " << i+1 << "/3..." << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(2));
         }
     }
@@ -68,10 +70,10 @@ void Node::run_cli() {
             break;
         } 
         else if (input == "help" || input == "?") {
-            std::cout << "\n--- Available Commands ---\n"
-                      << "  ask <text> : Send prompt to AI\n"
-                      << "  stats      : Node status\n"
-                      << "  peers      : Active connections\n"
+            std::cout << "\n--- Commands ---\n"
+                      << "  ask <text> : AI Prompt\n"
+                      << "  stats      : Node Stats\n"
+                      << "  peers      : Connections\n"
                       << "  ls         : Model info\n"
                       << "  exit       : Shutdown\n" << std::endl;
         }
@@ -79,19 +81,21 @@ void Node::run_cli() {
             std::cout << "\n--- Stats ---\n"
                       << "  ID:    " << config_.node_id << "\n"
                       << "  Port:  " << config_.port << "\n"
-                      << "  Role:  " << (config_.is_seed ? "SEED" : "PEER") << "\n" << std::endl;
+                      << "  Role:  " << (config_.is_seed ? "SEED" : "PEER") << "\n"
+                      << "  Peers: " << conn_manager_->get_active_peers_count() << "\n" << std::endl;
         }
         else if (input == "peers") {
-            std::cout << "[Network] Peers: " << conn_manager_->get_active_peers_count() << std::endl;
+            std::cout << "[Network] Active connections: " << conn_manager_->get_active_peers_count() << std::endl;
         }
         else if (input == "ls") {
-            std::cout << "[AI Core] Model loaded and ready." << std::endl;
+            std::cout << "[AI Core] Engine active. Model in memory." << std::endl;
         }
         else if (input.rfind("ask ", 0) == 0) {
-            std::cout << "\n[Response]: " << engine_->predict(input.substr(4)) << "\n" << std::endl;
+            std::string prompt = input.substr(4);
+            std::cout << "\n[AI]: " << engine_->predict(prompt) << "\n" << std::endl;
         }
         else {
-            std::cout << "Unknown command. Type 'help'." << std::endl;
+            std::cout << "Unknown command: " << input << ". Type 'help'." << std::endl;
         }
     }
 }
