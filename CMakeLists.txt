@@ -12,9 +12,13 @@ set(SOURCES
     src/core/shard_storage.cpp
     src/core/task_manager.cpp
     src/core/consensus_engine.cpp
+    src/core/integrity_checker.cpp
     src/network/bootstrap_manager.cpp
     src/network/connection_manager.cpp
+    src/network/gossip_service.cpp
 )
 
 add_executable(plexome_node ${SOURCES})
 target_link_libraries(plexome_node PUBLIC stdc++fs)
+
+message(STATUS "Plexome Architecture: All modules integrated.")
