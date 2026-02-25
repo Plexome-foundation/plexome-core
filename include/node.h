@@ -19,6 +19,7 @@ namespace plexome {
         void process_core_logic();
         AppConfig config_;
         std::atomic<bool> is_running_;
+        std::unique_ptr<InferenceEngine> engine_;
         std::unique_ptr<ConnectionManager> conn_manager_;
         std::unique_ptr<KnowledgeManager> knowledge_;
     };
