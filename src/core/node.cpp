@@ -34,7 +34,6 @@ void Node::init() {
         std::filesystem::create_directories("./models");
     }
 
-    // Загрузка модели GGUF
     for (const auto& entry : std::filesystem::directory_iterator("./models")) {
         if (entry.path().extension() == ".gguf") {
             if (engine_->load_model(entry.path().string())) {
@@ -49,9 +48,27 @@ void Node::run() {
     is_running_ = true;
 
     if (config_.is_seed) {
-        conn_manager_->start_server(static_cast<int>(config_.port));
+        if (!conn_manager_->start_server(static_cast<int>(config_.port))) {
+            std::cerr << "[Network] CRITICAL: Port " << config_.port << " is busy!" << std::endl;
+            is_running_ = false;
+            return;
+        }
     } else {
-        conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port));
+        std::cout << "[Network] Looking for swarm via " << config_.seed_host << "..." << std::endl;
+        
+        bool connected = false;
+        for(int i = 0; i < 5; ++i) {
+            if (conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) {
+                connected = true;
+                break;
+            }
+            std::cout << "[Network] Seed not ready, retrying in 2s... (" << i+1 << "/5)" << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+
+        if (!connected) {
+            std::cout << "[Network] Warning: No response from seed. Running in isolation." << std::endl;
+        }
     }
 
     std::thread cli_thread(&Node::run_cli, this);
@@ -61,6 +78,7 @@ void Node::run() {
         process_core_logic();
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
+    stop();
 }
 
 void Node::run_cli() {
@@ -80,7 +98,6 @@ void Node::run_cli() {
                       << "  stats        : Show node identity and resources\n"
                       << "  peers        : List active swarm connections\n"
                       << "  ls           : Show current model info\n"
-                      << "  help         : Show this menu\n"
                       << "  exit         : Shutdown node\n" << std::endl;
         }
         else if (input == "stats") {
@@ -98,14 +115,13 @@ void Node::run_cli() {
             std::cout << "\n[Response]: " << response << "\n" << std::endl;
         }
         else if (input == "peers") {
-            size_t count = conn_manager_->get_active_peers_count();
-            std::cout << "[Network] Connected peers: " << count << std::endl;
+            std::cout << "[Network] Connected peers: " << conn_manager_->get_active_peers_count() << std::endl;
         }
         else if (input == "ls") {
-             std::cout << "[AI Core] Engine initialized and model loaded." << std::endl;
+             std::cout << "[AI Core] Engine active. Model loaded from ./models" << std::endl;
         }
         else {
-            std::cout << "Unknown command. Type 'help' for a list of commands." << std::endl;
+            std::cout << "Unknown command. Type 'help' for info." << std::endl;
         }
     }
 }
