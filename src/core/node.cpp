@@ -23,35 +23,39 @@ Node::~Node() {
 
 void Node::init() {
     std::cout << "[System] Initializing Plexome Enterprise Node..." << std::endl;
-    // Убедись, что в plexome_types.h поля называются именно так (port, node_id)
+    // Используем твои uint16_t и строковые поля
     std::cout << "[System] Node ID: " << config_.node_id << " | Port: " << config_.port << std::endl;
 
-    if (!std::filesystem::exists("./knowledge")) {
-        std::filesystem::create_directory("./knowledge");
+    if (!std::filesystem::exists(config_.storage_path)) {
+        std::filesystem::create_directories(config_.storage_path);
     }
 }
 
 void Node::run() {
     is_running_ = true;
 
+    // СЕТЕВАЯ ЛОГИКА
     if (config_.is_seed) {
-        if (!conn_manager_->start_server(config_.port)) {
+        // Запуск сервера на порту из конфига
+        if (!conn_manager_->start_server(static_cast<int>(config_.port))) {
             std::cerr << "[Network] Critical: Could not bind port " << config_.port << std::endl;
             return;
         }
     } else {
+        // Подключение к сиду через DNS
         std::cout << "[Network] Joining Swarm via DNS: " << config_.seed_host << std::endl;
-        // ИСПРАВЛЕНО: Теперь передаем и хост, и порт
-        if (!conn_manager_->connect_to_seed(config_.seed_host, config_.port)) {
-            std::cout << "[Network] Seed unreachable. Standing by..." << std::endl;
+        if (!conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) {
+            std::cout << "[Network] Seed unreachable. Mode: Standalone/Passive." << std::endl;
         }
     }
 
+    // Запуск CLI
     std::thread cli_thread(&Node::run_cli, this);
     cli_thread.detach(); 
 
-    std::cout << "[Core] Node is operational." << std::endl;
+    std::cout << "[Core] Node is operational. Type 'help' for commands." << std::endl;
     
+    // Основной цикл
     while (is_running_) {
         process_core_logic();
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -74,15 +78,17 @@ void Node::run_cli() {
         } 
         else if (input == "peers") {
             size_t count = conn_manager_->get_active_peers_count();
-            std::cout << "[Network] Connected peers: " << count << std::endl;
+            std::cout << "[Network] Active TCP connections: " << count << std::endl;
         } 
         else if (input == "stats") {
             std::cout << "\n--- Node Stats ---\n"
-                      << "Role: " << (config_.is_seed ? "SEED" : "PEER") << "\n"
-                      << "ID:   " << config_.node_id << "\n\n";
+                      << "Role:    " << (config_.is_seed ? "SEED" : "PEER") << "\n"
+                      << "Port:    " << config_.port << "\n"
+                      << "Storage: " << config_.storage_path << "\n"
+                      << "RAM Lim: " << config_.ram_limit_bytes << " bytes\n\n";
         }
         else if (input == "help") {
-            std::cout << "Commands: peers, stats, exit, help" << std::endl;
+            std::cout << "\nCommands: peers, stats, exit, help\n" << std::endl;
         }
         else {
             std::cout << "Unknown command. Type 'help'." << std::endl;
@@ -91,7 +97,7 @@ void Node::run_cli() {
 }
 
 void Node::process_core_logic() {
-    // Здесь будет Gossip и задачи
+    // Резерв под Gossip и задачи
 }
 
 void Node::stop() {
@@ -99,6 +105,7 @@ void Node::stop() {
     if (conn_manager_) {
         conn_manager_->stop();
     }
+    std::cout << "[System] Node stopped." << std::endl;
 }
 
 } // namespace plexome
