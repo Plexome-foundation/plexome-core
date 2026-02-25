@@ -20,6 +20,7 @@ set(SOURCES
     src/network/bootstrap_manager.cpp
     src/network/connection_manager.cpp
     src/network/gossip_service.cpp
+    src/core/inference_engine.cpp
 )
 
 add_executable(plexome_node ${SOURCES})
