@@ -5,6 +5,7 @@
 #include "connection_manager.h"
 #include <iostream>
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -25,10 +26,7 @@ ConnectionManager::~ConnectionManager() {
 bool ConnectionManager::start_server(int port) {
     port_ = port;
     listen_socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listen_socket_ == INVALID_SOCKET) {
-        std::cerr << "[Network] Socket error: " << WSAGetLastError() << std::endl;
-        return false;
-    }
+    if (listen_socket_ == INVALID_SOCKET) return false;
 
     int opt = 1;
     setsockopt(listen_socket_, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
@@ -45,22 +43,24 @@ bool ConnectionManager::start_server(int port) {
     }
 
     if (listen(listen_socket_, SOMAXCONN) == SOCKET_ERROR) {
-        std::cerr << "[Network] LISTEN ERROR: " << WSAGetLastError() << std::endl;
         closesocket(listen_socket_);
         return false;
     }
 
-    // Определяем реальный IP ноды
-    char host[256];
-    if (gethostname(host, sizeof(host)) == 0) {
-        struct hostent* he = gethostbyname(host);
-        if (he != nullptr) {
-            std::cout << "[Network] Node is broadcasting on:" << std::endl;
-            for (int i = 0; he->h_addr_list[i] != nullptr; i++) {
-                struct in_addr addr;
-                memcpy(&addr, he->h_addr_list[i], sizeof(struct in_addr));
-                std::cout << "  -> IP: " << inet_ntoa(addr) << std::endl;
+    // Вывод всех IP-адресов сервера для проверки
+    char host_name[256];
+    if (gethostname(host_name, sizeof(host_name)) == 0) {
+        struct addrinfo hints = {}, *res = nullptr;
+        hints.ai_family = AF_INET;
+        if (getaddrinfo(host_name, nullptr, &hints, &res) == 0) {
+            std::cout << "[Network] Server is listening on interfaces:" << std::endl;
+            for (auto p = res; p != nullptr; p = p->ai_next) {
+                char ip_str[INET_ADDRSTRLEN];
+                struct sockaddr_in* addr = (struct sockaddr_in*)p->ai_addr;
+                inet_ntop(AF_INET, &addr->sin_addr, ip_str, sizeof(ip_str));
+                std::cout << "  -> IP: " << ip_str << std::endl;
             }
+            freeaddrinfo(res);
         }
     }
 
@@ -73,20 +73,22 @@ bool ConnectionManager::start_server(int port) {
 void ConnectionManager::accept_loop() {
     while (is_running_) {
         sockaddr_in client_addr;
-        int client_addr_len = sizeof(client_addr);
-        SOCKET s = accept((SOCKET)listen_socket_, (struct sockaddr*)&client_addr, &client_addr_len);
+        int addr_len = sizeof(client_addr);
+        SOCKET s = accept((SOCKET)listen_socket_, (struct sockaddr*)&client_addr, &addr_len);
         
         if (s == INVALID_SOCKET) {
             if (is_running_) continue; 
             else break; 
         }
 
-        std::string client_ip = inet_ntoa(client_addr.sin_addr);
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+
         {
             std::lock_guard<std::mutex> lock(sockets_mtx_);
             active_sockets_.push_back((unsigned long long)s);
         }
-        std::cout << "\n[Network] [+] Peer " << client_ip << " connected! Total: " << get_active_peers_count() << "\npxm> " << std::flush;
+        std::cout << "\n[Network] [+] Peer connected: " << client_ip << " | Total: " << get_active_peers_count() << "\npxm> " << std::flush;
     }
 }
 
@@ -97,7 +99,7 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
     hints.ai_protocol = IPPROTO_TCP;
 
     if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result) != 0) {
-        std::cerr << "[Network] DNS error for host: " << host << std::endl;
+        std::cerr << "[Network] DNS error: " << host << std::endl;
         return false;
     }
 
@@ -107,11 +109,12 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
         return false;
     }
 
-    std::cout << "[Network] Attempting to connect to " << host << "..." << std::endl;
-
     if (connect(s, result->ai_addr, (int)result->ai_addrlen) == SOCKET_ERROR) {
         int err = WSAGetLastError();
-        std::cerr << "[Network] Connection failed to " << host << ". Code: " << err << std::endl;
+        std::cerr << "[Network] Connection to " << host << " failed! Error: " << err;
+        if (err == 10060) std::cerr << " (Timeout - Check Firewall)";
+        if (err == 10061) std::cerr << " (Refused - Check if Server is running)";
+        std::cerr << std::endl;
         closesocket(s);
         freeaddrinfo(result);
         return false;
@@ -122,7 +125,7 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
         std::lock_guard<std::mutex> lock(sockets_mtx_);
         active_sockets_.push_back((unsigned long long)s);
     }
-    std::cout << "[Network] Handshake successful with " << host << std::endl;
+    std::cout << "[Network] Connected to " << host << std::endl;
     return true;
 }
 
