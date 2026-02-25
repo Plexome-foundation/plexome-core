@@ -20,7 +20,7 @@ Node::Node(const AppConfig& config)
 Node::~Node() { stop(); }
 
 void Node::init() {
-    std::cout << "[System] Initializing Node: " << config_.node_id << std::endl;
+    std::cout << "[System] Node ID: " << config_.node_id << " Initializing..." << std::endl;
     if (!std::filesystem::exists("./models")) std::filesystem::create_directories("./models");
 
     for (const auto& entry : std::filesystem::directory_iterator("./models")) {
@@ -38,15 +38,20 @@ void Node::run() {
 
     if (config_.is_seed) {
         if (!conn_manager_->start_server(static_cast<int>(config_.port))) {
-            std::cerr << "[Network] Failed to start seed server!" << std::endl;
+            std::cerr << "[Network] CRITICAL: Could not start server!" << std::endl;
         }
     } else {
-        std::cout << "[Network] Connecting to " << config_.seed_host << ":" << config_.port << "..." << std::endl;
-        for(int i = 0; i < 3; ++i) {
-            if (conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) break;
-            std::cout << "[Network] Retry " << i+1 << "/3..." << std::endl;
+        std::cout << "[Network] Connecting to " << config_.seed_host << "..." << std::endl;
+        bool connected = false;
+        for(int i = 0; i < 5; ++i) {
+            if (conn_manager_->connect_to_seed(config_.seed_host, static_cast<int>(config_.port))) {
+                connected = true;
+                break;
+            }
+            std::cout << "[Network] Retrying connection (" << i+1 << "/5)..." << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(2));
         }
+        if (!connected) std::cout << "[Network] Warning: Running in Standalone mode." << std::endl;
     }
 
     std::thread cli_thread(&Node::run_cli, this);
@@ -70,32 +75,33 @@ void Node::run_cli() {
             break;
         } 
         else if (input == "help" || input == "?") {
-            std::cout << "\n--- Commands ---\n"
-                      << "  ask <text> : AI Prompt\n"
-                      << "  stats      : Node Stats\n"
-                      << "  peers      : Connections\n"
-                      << "  ls         : Model info\n"
-                      << "  exit       : Shutdown\n" << std::endl;
+            std::cout << "\n--- Available Commands ---\n"
+                      << "  ask <text> : Send prompt to AI\n"
+                      << "  stats      : Show node identity\n"
+                      << "  peers      : Show active swarm connections\n"
+                      << "  ls         : Model information\n"
+                      << "  help       : This menu\n"
+                      << "  exit       : Shutdown node\n" << std::endl;
         }
         else if (input == "stats") {
-            std::cout << "\n--- Stats ---\n"
+            std::cout << "\n--- Node Statistics ---\n"
                       << "  ID:    " << config_.node_id << "\n"
                       << "  Port:  " << config_.port << "\n"
                       << "  Role:  " << (config_.is_seed ? "SEED" : "PEER") << "\n"
                       << "  Peers: " << conn_manager_->get_active_peers_count() << "\n" << std::endl;
         }
         else if (input == "peers") {
-            std::cout << "[Network] Active connections: " << conn_manager_->get_active_peers_count() << std::endl;
+            std::cout << "[Network] Active peers: " << conn_manager_->get_active_peers_count() << std::endl;
         }
         else if (input == "ls") {
-            std::cout << "[AI Core] Engine active. Model in memory." << std::endl;
+            std::cout << "[AI Core] Inference engine active. Model ready." << std::endl;
         }
         else if (input.rfind("ask ", 0) == 0) {
             std::string prompt = input.substr(4);
-            std::cout << "\n[AI]: " << engine_->predict(prompt) << "\n" << std::endl;
+            std::cout << "\n[Response]: " << engine_->predict(prompt) << "\n" << std::endl;
         }
         else {
-            std::cout << "Unknown command: " << input << ". Type 'help'." << std::endl;
+            std::cout << "Unknown command. Type 'help'." << std::endl;
         }
     }
 }
