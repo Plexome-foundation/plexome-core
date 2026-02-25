@@ -22,7 +22,6 @@ public:
 private:
     void accept_loop();
 
-    // Используем базовый тип, чтобы не включать windows.h здесь
     unsigned long long listen_socket_; 
     std::vector<unsigned long long> active_sockets_;
     std::mutex sockets_mtx_;
@@ -33,4 +32,4 @@ private:
 
 } // namespace plexome
 
-#endif // PLEXOME_CONNECTION_MANAGER_H
+#endif
