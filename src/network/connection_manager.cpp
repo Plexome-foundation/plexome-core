@@ -1,3 +1,4 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -11,25 +12,21 @@ namespace plexome {
 
 ConnectionManager::ConnectionManager() 
     : listen_socket_(INVALID_SOCKET), is_running_(false), port_(0) {
-#ifdef _WIN32
     WSADATA wsaData;
     int res = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (res != 0) std::cerr << "[Network] WSAStartup failed: " << res << std::endl;
-#endif
 }
 
 ConnectionManager::~ConnectionManager() {
     stop();
-#ifdef _WIN32
     WSACleanup();
-#endif
 }
 
 bool ConnectionManager::start_server(int port) {
     port_ = port;
     listen_socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listen_socket_ == INVALID_SOCKET) {
-        std::cerr << "[Network] Socket creation failed: " << WSAGetLastError() << std::endl;
+        std::cerr << "[Network] Socket error: " << WSAGetLastError() << std::endl;
         return false;
     }
 
@@ -42,7 +39,7 @@ bool ConnectionManager::start_server(int port) {
     server_addr.sin_port = htons((u_short)port_);
 
     if (bind(listen_socket_, (SOCKADDR*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-        std::cerr << "[Network] BIND ERROR (Port " << port_ << "): " << WSAGetLastError() << std::endl;
+        std::cerr << "[Network] BIND ERROR: " << WSAGetLastError() << std::endl;
         closesocket(listen_socket_);
         return false;
     }
@@ -53,25 +50,22 @@ bool ConnectionManager::start_server(int port) {
         return false;
     }
 
-    // Получаем локальный IP для вывода в консоль
-    char host_name[256];
-    char local_ip[INET_ADDRSTRLEN] = "127.0.0.1";
-    if (gethostname(host_name, sizeof(host_name)) == 0) {
-        struct addrinfo hints = {}, *res = nullptr;
-        hints.ai_family = AF_INET;
-        if (getaddrinfo(host_name, nullptr, &hints, &res) == 0) {
-            sockaddr_in* addr = (sockaddr_in*)res->ai_addr;
-            inet_ntop(AF_INET, &addr->sin_addr, local_ip, INET_ADDRSTRLEN);
-            freeaddrinfo(res);
+    // Определяем реальный IP ноды
+    char host[256];
+    if (gethostname(host, sizeof(host)) == 0) {
+        struct hostent* he = gethostbyname(host);
+        if (he != nullptr) {
+            std::cout << "[Network] Node is broadcasting on:" << std::endl;
+            for (int i = 0; he->h_addr_list[i] != nullptr; i++) {
+                struct in_addr addr;
+                memcpy(&addr, he->h_addr_list[i], sizeof(struct in_addr));
+                std::cout << "  -> IP: " << inet_ntoa(addr) << std::endl;
+            }
         }
     }
 
     is_running_ = true;
-    std::cout << "[Network] Seed logic active!" << std::endl;
-    std::cout << "[Network] Local IP: " << local_ip << std::endl;
-    std::cout << "[Network] Port:     " << port_ << std::endl;
-    std::cout << "[Network] Waiting for peers..." << std::endl;
-
+    std::cout << "[Network] Seed listening on port: " << port_ << std::endl;
     accept_thread_ = std::thread(&ConnectionManager::accept_loop, this);
     return true;
 }
@@ -87,15 +81,12 @@ void ConnectionManager::accept_loop() {
             else break; 
         }
 
-        char client_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-
+        std::string client_ip = inet_ntoa(client_addr.sin_addr);
         {
             std::lock_guard<std::mutex> lock(sockets_mtx_);
             active_sockets_.push_back((unsigned long long)s);
         }
-        std::cout << "\n[Network] [+] New peer connected from " << client_ip 
-                  << "! Total peers: " << get_active_peers_count() << "\npxm> " << std::flush;
+        std::cout << "\n[Network] [+] Peer " << client_ip << " connected! Total: " << get_active_peers_count() << "\npxm> " << std::flush;
     }
 }
 
@@ -105,40 +96,33 @@ bool ConnectionManager::connect_to_seed(const std::string& host, int port) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    int dns_res = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result);
-    if (dns_res != 0) {
-        std::cerr << "[Network] DNS ERROR for " << host << ": " << dns_res << std::endl;
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result) != 0) {
+        std::cerr << "[Network] DNS error for host: " << host << std::endl;
         return false;
     }
 
-    SOCKET s = INVALID_SOCKET;
-    for (addrinfo* ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
-        s = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
-        if (s == INVALID_SOCKET) continue;
+    SOCKET s = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+    if (s == INVALID_SOCKET) {
+        freeaddrinfo(result);
+        return false;
+    }
 
-        if (connect(s, ptr->ai_addr, (int)ptr->ai_addrlen) == SOCKET_ERROR) {
-            int err = WSAGetLastError();
-            std::cerr << "[Network] CONNECT ERROR to " << host << " (" << host << "): " << err;
-            if (err == 10061) std::cerr << " (Refused)";
-            if (err == 10060) std::cerr << " (Timeout)";
-            std::cerr << std::endl;
-            
-            closesocket(s);
-            s = INVALID_SOCKET;
-            continue;
-        }
-        break; 
+    std::cout << "[Network] Attempting to connect to " << host << "..." << std::endl;
+
+    if (connect(s, result->ai_addr, (int)result->ai_addrlen) == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        std::cerr << "[Network] Connection failed to " << host << ". Code: " << err << std::endl;
+        closesocket(s);
+        freeaddrinfo(result);
+        return false;
     }
 
     freeaddrinfo(result);
-
-    if (s == INVALID_SOCKET) return false;
-
     {
         std::lock_guard<std::mutex> lock(sockets_mtx_);
         active_sockets_.push_back((unsigned long long)s);
     }
-    std::cout << "[Network] Connected to Swarm Seed: " << host << std::endl;
+    std::cout << "[Network] Handshake successful with " << host << std::endl;
     return true;
 }
 
@@ -155,7 +139,7 @@ void ConnectionManager::stop() {
     }
     std::lock_guard<std::mutex> lock(sockets_mtx_);
     for (auto s : active_sockets_) {
-        shutdown((SOCKET)s, 2); 
+        shutdown((SOCKET)s, SD_BOTH);
         closesocket((SOCKET)s);
     }
     active_sockets_.clear();
