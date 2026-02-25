@@ -21,6 +21,7 @@ include_directories(include)
 
 # 3. Source File Registry
 set(SOURCES
+    src/core/main.cpp
     src/core/node.cpp
     src/core/memory_manager.cpp
     src/core/shard_storage.cpp
