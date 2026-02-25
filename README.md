@@ -1,36 +1,64 @@
-# 🧬 PLEXOME FOUNDATION | Swarm AI Node v2.0
+Plexome Core v2.0 (Modular Swarm Edition)
+Plexome is a high-performance, decentralized AI swarm designed for autonomous continuous learning and distributed inference. It enables thousands of consumer-grade PCs to act as a single, collective intelligence by scanning data, training local LoRA adapters, and synchronizing knowledge through a P2P network.
 
-**Plexome** is a decentralized, peer-to-peer AI network designed for distributed inference and federated learning. By applying **Enterprise Storage Principles (AI-RAID)** to neural networks, Plexome allows a swarm of standard computers to function as a single, massive virtual supercomputer.
+🚀 The Vision: V2.0 Modular Architecture
+Today, we transitioned from a monolithic design to a Modular Plugin Architecture. This allows the network to update its core components (AI logic or Network stack) on-the-fly without restarting the node.
 
+Core Components:
+plexome_host.exe (The Orchestrator): A lightweight dispatcher that manages module lifecycles and routes tasks between blocks.
 
+pxm_ai.dll (The Brain): Multithreaded LLM engine based on llama.cpp. Optimized for Phi-3-mini with parallel context pooling and smart stop-token handling.
 
-## 🚀 Key Features (v2.0 Pro)
+pxm_network.dll (The Senses): Decentralized P2P stack using a custom Swarm protocol for real-time model synchronization and weight exchange.
 
-* **AI-RAID (Pipeline Parallelism):** Just like RAID-0 stripes data across disks, Plexome stripes LLM layers across nodes. If a model (e.g., 70B parameters) is too large for one GPU, the swarm splits the layers across multiple participants.
-* **Hardware Benchmarking (PlexoParrots):** An integrated 2-second stress test evaluates node performance upon startup. The system automatically assigns a tier: **Potato**, **Standard**, or **Titan**.
-* **Federated LoRA Injection:** Nodes can learn specialized technical data (e.g., HPE 3PAR, Primera, Alletra documentation) locally. These "knowledge deltas" (LoRA) are then synchronized across the swarm without sharing raw data.
-* **Swarm Routing:** Intelligent tensor routing via port **7539**. Computation results travel through the pipeline with low latency using an optimized P2P bus.
-* **Cross-Platform Core:** Native C++20 implementation for Windows (Winsock2) and Linux, featuring graceful shutdown and static linking capabilities.
+🛠 Project Structure (The Clean Slate)
+The project is now organized into isolated, maintainable blocks:
 
-## 🛠 Quick Start (Windows)
+Plaintext
+/plexome-core
+│   CMakeLists.txt          # Unified build system
+├───include
+│       module_interface.h  # Universal DLL contract (C-style API)
+│       plexome_types.h     # Swarm-wide data structures (Roles & Tiers)
+├───src
+│   ├───host                # Main executable logic
+│   └───modules
+│       ├───ai              # AI Inference & LoRA logic
+│       └───network         # P2P communication stack
+└───models                  # Local storage for GGUF weights
+🧠 Swarm Intelligence Features
+Performance Tiers: Nodes automatically categorize themselves as Potato, Standard, or Titan (Queen) based on hardware benchmarks.
 
-### Prerequisites
-* Visual Studio 2022 (with "Desktop development with C++" and "CMake tools").
-* At least 8GB of RAM (16GB+ recommended for Titan nodes).
+Decentralized Federated Learning: Nodes scan local/web data, generate 50MB LoRA adapters, and submit them for consensus-based merging.
 
-### Build Instructions
-1.  **Clone the Repo:** Open Visual Studio -> Clone a Repository -> `https://github.com/your-repo/plexome`.
-2.  **Configure:** Wait for CMake to finish generating the cache.
-3.  **Build:** Set configuration to `x64-Release` and press `Ctrl+Shift+B`.
-4.  **Download Models:**
-    ```powershell
-    .\scripts\download_models.ps1
-    ```
+Hallucination Protection: The "Council of Queens" verifies training results through weight-vector similarity checks before committing to the global model.
 
-### Configuration (`plexome.conf`)
-Ensure your config file is in the same directory as the `.exe`:
-```ini
-port=7539
-is_seed=false
-vram_limit_gb=8
-storage_path=./data
+🛠 Build Instructions
+Plexome Core is built using CMake and requires a C++20 compliant compiler (MSVC 2022+ recommended for Windows).
+
+Clone with submodules:
+
+Bash
+git clone --recursive https://github.com/Plexome-foundation/plexome-core
+Build the system:
+
+Bash
+mkdir build && cd build
+cmake ..
+cmake --build . --config Release
+Run the node:
+
+As a Seed: plexome_host.exe --seed
+
+As a Peer: plexome_host.exe
+
+🗺 Roadmap (What's Next)
+[x] Transition to Modular DLL Architecture.
+
+[ ] Phase 3 (Next): Implement automated Hardware Benchmarking ("The Parrot Meter").
+
+[ ] Phase 4: Develop the Distributed Web-Scanner for automated knowledge injection.
+
+[ ] Phase 5: Peer-to-peer LoRA weight aggregation and consensus engine.
+
+Developed by Architect and the AI Swarm Community. Built for the era of autonomous intelligence.
