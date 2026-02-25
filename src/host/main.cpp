@@ -81,13 +81,14 @@ int main(int argc, char* argv[]) {
     // 2. Define modules order
     // pxm_bench is FIRST to determine the hardware tier before other modules start
     std::vector<std::string> module_names = { 
-        "pxm_bench", 
-        "pxm_ai", 
-        "pxm_network", 
-        "pxm_topology", 
-        "pxm_sharder", 
-        "pxm_updater" 
-    };
+    "pxm_bench", 
+    "pxm_ai", 
+    "pxm_network", 
+    "pxm_topology", 
+    "pxm_sharder", 
+    "pxm_updater",
+    "pxm_security" 
+};
     
     std::map<std::string, void*> loaded_modules;
 
