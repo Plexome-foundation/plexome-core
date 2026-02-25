@@ -12,9 +12,10 @@ set(SOURCES
     src/core/shard_storage.cpp
     src/core/task_manager.cpp
     src/core/consensus_engine.cpp
+    src/network/bootstrap_manager.cpp
 )
 
 add_executable(plexome_node ${SOURCES})
 target_link_libraries(plexome_node PUBLIC stdc++fs)
 
-message(STATUS "Plexome Full Node Build System Ready")
+message(STATUS "Plexome Production Build Ready")
