@@ -6,6 +6,7 @@
 namespace plexome {
     class ConnectionManager;
     class KnowledgeManager;
+    class InferenceEngine;
 
     class Node {
     public:
