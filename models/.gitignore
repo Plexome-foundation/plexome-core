@@ -1,0 +1,8 @@
+# Ignore model binaries
+/models/*.gguf
+/models/*.bin
+
+# Ignore local data and logs
+/plexome_data/
+*.log
+dashboard.html
