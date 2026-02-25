@@ -26,6 +26,9 @@ namespace plexome {
 
                 std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
                 
+                // КРИТИЧНО: Закрываем файл перед переименованием, иначе Windows заблокирует доступ
+                file.close(); 
+                
                 if (!content.empty()) {
                     KnowledgePacket packet;
                     packet.data = content;
@@ -34,6 +37,14 @@ namespace plexome {
                     
                     new_packets.push_back(packet);
                     std::cout << "[Knowledge] Ingested manual: " << packet.source_name << std::endl;
+                    
+                    // Помечаем файл как обработанный, меняя расширение на .done
+                    try {
+                        std::filesystem::path new_path = entry.path().string() + ".done";
+                        std::filesystem::rename(entry.path(), new_path);
+                    } catch (const std::filesystem::filesystem_error& e) {
+                        std::cerr << "[Knowledge] Error renaming file: " << e.what() << std::endl;
+                    }
                 }
             }
         }
