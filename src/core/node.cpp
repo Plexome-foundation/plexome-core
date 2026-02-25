@@ -1,54 +1,44 @@
 #include "plexome_types.h"
-#include "bootstrap_manager.h"
-#include "connection_manager.h"
-#include "integrity_checker.h"
-#include "gossip_service.h"
+#include "stats_collector.h"
+#include "cli_interface.h"
+#include "web_api.h"
 #include <iostream>
-#include <memory>
+#include <thread>
 
 class PlexomeNode {
 public:
-    PlexomeNode(plexome::NodeRole role, bool is_seed) {
-        bootstrap_ = std::make_unique<plexome::BootstrapManager>(is_seed);
-        conn_manager_ = std::make_unique<plexome::ConnectionManager>();
-        gossip_ = std::make_unique<plexome::GossipService>();
-        identity_.role = role;
+    PlexomeNode() {
+        stats_ = std::make_unique<plexome::StatsCollector>();
+        cli_ = std::make_unique<plexome::CLIInterface>();
     }
 
     void start() {
-        bootstrap_->bootstrap();
+        std::cout << "[Plexome] Starting Node with Management Interfaces..." << std::endl;
         
-        // Simulation: Recieve shard data and verify integrity
-        std::vector<uint8_t> shard_data = {0xAA, 0xBB, 0xCC};
-        plexome::ShardID expected_id = {0xAA}; // Mock expected ID
-        
-        if (plexome::IntegrityChecker::verify(shard_data, expected_id)) {
-            std::cout << "[Plexome] Shard integrity verified. Adding to L2 Cache." << std::endl;
-        } else {
-            std::cerr << "[Plexome] Data corruption detected!" << std::endl;
+        stats_->set_current_model("Llama-3-70B-Plexome-v1");
+
+        // Start CLI in a background thread
+        std::thread cli_thread([this]() {
+            cli_->run_loop(*stats_);
+        });
+
+        // Main operation loop
+        while (true) {
+            // Here the node does its background work: 
+            // syncing shards, processing tasks, etc.
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
-        // Simulation: Receive a Gossip message
-        std::string msg_id = "broadcast_001";
-        if (gossip_->process_message(msg_id)) {
-            std::cout << "[Gossip] New network update received: " << msg_id << std::endl;
-        }
+        if (cli_thread.joinable()) cli_thread.join();
     }
 
 private:
-    plexome::NodeIdentity identity_ = {"pxm_main_01", plexome::NodeRole::Titan, 0, 0, 0};
-    std::unique_ptr<plexome::BootstrapManager> bootstrap_;
-    std::unique_ptr<plexome::ConnectionManager> conn_manager_;
-    std::unique_ptr<plexome::GossipService> gossip_;
+    std::unique_ptr<plexome::StatsCollector> stats_;
+    std::unique_ptr<plexome::CLIInterface> cli_;
 };
 
-int main(int argc, char* argv[]) {
-    bool run_as_seed = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--seed") run_as_seed = true;
-    }
-
-    PlexomeNode node(plexome::NodeRole::Titan, run_as_seed);
+int main() {
+    PlexomeNode node;
     node.start();
     return 0;
 }
