@@ -28,7 +28,9 @@ include_directories(include)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "Disable llama tests" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "Disable llama examples" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "Disable llama server" FORCE)
-
+# === ДОБАВИТЬ ВОТ ЭТУ СТРОКУ ===
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libs" FORCE)
+# ===============================
 # Подключаем папку (убедись, что папка llama.cpp лежит в корне проекта)
 add_subdirectory(llama.cpp)
 
