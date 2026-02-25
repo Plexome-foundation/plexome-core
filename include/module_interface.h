@@ -7,15 +7,17 @@
     #define PXM_API extern "C"
 #endif
 
-// Every module must implement these basic functions
+// Structure to identify the module
 struct ModuleInfo {
     const char* name;
     const char* version;
     const char* description;
 };
 
-typedef void (*PXM_INIT_FUNC)();
-typedef void (*PXM_SHUTDOWN_FUNC)();
+// Function pointer types for dynamic loading
 typedef ModuleInfo (*PXM_GET_INFO_FUNC)();
+typedef bool (*PXM_INIT_FUNC)();
+typedef void (*PXM_SHUTDOWN_FUNC)();
+typedef void (*PXM_RUN_FUNC)(); // Main logic loop of the module
 
 #endif // PXM_MODULE_INTERFACE_H
