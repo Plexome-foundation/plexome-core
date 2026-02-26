@@ -1,8 +1,8 @@
 /**
- * Plexome Core v2.0 - AI Engine (Strict Math + Server Safe Mode Edition)
+ * Plexome Core v2.0 - AI Engine (NUMA & Xeon Safe Edition)
  * Author: Georgii
- * Bypasses unstable llama.cpp KV cache APIs using strict manual token tracking.
- * Includes mmap=false and diagnostics for safe execution on remote servers.
+ * Includes strict manual token tracking, mmap=true for large RAM, 
+ * and restricted thread pool to prevent STATUS_STACK_BUFFER_OVERRUN on multi-core servers.
  */
 
 #define NOMINMAX
@@ -60,7 +60,7 @@ void clean_output(std::string& text) {
 
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome AI Engine", "2.9.0-safe", "AI with strict KV tracking and Server Safe Mode." };
+        return { "Plexome AI Engine", "2.9.5-xeon-safe", "AI with strict KV tracking and NUMA thread safety." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
@@ -80,14 +80,14 @@ extern "C" {
 
         auto mparams = llama_model_default_params();
         
-        // CRITICAL SERVER FIXES:
-        // 1. Disable mmap to prevent STATUS_STACK_BUFFER_OVERRUN on systems without swap space
-        mparams.use_mmap = false; 
+        // SERVER FIX 1: Enable MMAP. With 60GB of RAM, mapping the file directly
+        // is safer than trying to fread() 2.2GB into a single heap allocation.
+        mparams.use_mmap = true; 
         
-        // 2. Disable GPU offloading explicitly for generic server compatibility
+        // Disable GPU offloading explicitly for generic server compatibility
         mparams.n_gpu_layers = 0; 
 
-        std::cout << "[AI] Loading model into RAM (mmap=false, gpu_layers=0)..." << std::endl;
+        std::cout << "[AI] Loading model into RAM (mmap=true, gpu_layers=0)..." << std::endl;
 
         try {
             g_state.model = llama_load_model_from_file(config->model_path, mparams);
@@ -109,12 +109,17 @@ extern "C" {
         cparams.n_ctx = 2048; 
         cparams.n_batch = 512;
 
+        // SERVER FIX 2: Restrict Thread Pool. 
+        // Prevents thread pool explosion and memory corruption on NUMA Xeon architectures.
+        cparams.n_threads = 4;
+        cparams.n_threads_batch = 4;
+
         g_state.ctx = llama_new_context_with_model(g_state.model, cparams);
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
         g_state.n_past = 0; // Initialize manual tracker
         g_state.model_ready = true;
-        std::cout << "[AI] Pro-level engine initialized. Safe Mode active." << std::endl;
+        std::cout << "[AI] Pro-level engine initialized. Xeon Safe Mode active (Threads: 4)." << std::endl;
         return PxmStatus::OK;
     }
 
