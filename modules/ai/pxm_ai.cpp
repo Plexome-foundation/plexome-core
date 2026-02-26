@@ -80,7 +80,7 @@ extern "C" {
         auto cparams = llama_context_default_params();
         cparams.n_ctx = 2048; 
         cparams.n_batch = 512;
-        cparams.flash_attn = true; // Включаем быстрое внимание
+      
 
         // ====================================================================
         // ДИНАМИЧЕСКОЕ РАСПРЕДЕЛЕНИЕ ПОТОКОВ
