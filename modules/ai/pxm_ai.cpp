@@ -1,7 +1,7 @@
 /**
  * Plexome Core v2.0 - AI Engine (Inference Edition)
  * Author: Georgii
- * Fixed for modern Vocab Split API and crash-safety during sampling.
+ * Fixed for modern Vocab Split API with explicit batch memory allocation.
  */
 
 #include "../../include/module_interface.h"
@@ -33,8 +33,8 @@ extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
         return {
             "Plexome AI Engine",
-            "2.3.3-stable",
-            "Hardware-accelerated engine with crash-safe sampling logic."
+            "2.3.4-stable",
+            "Hardware-accelerated engine with explicit batch management."
         };
     }
 
@@ -44,33 +44,25 @@ extern "C" {
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
         if (!config) return PxmStatus::ERROR_INIT_FAILED;
 
-        std::cout << "[AI] Initializing backend with Vocab Split support..." << std::endl;
+        std::cout << "[AI] Initializing backend..." << std::endl;
         llama_backend_init();
 
-        // 1. Resilience check
         if (!config->model_path || !fs::exists(config->model_path)) {
-            std::cout << "[AI] WARNING: Model file not found. System waiting for P2P sync." << std::endl;
+            std::cout << "[AI] WARNING: Model file not found at " << (config->model_path ? config->model_path : "NULL") << std::endl;
             g_state.model_ready = false;
             return PxmStatus::OK; 
         }
 
-        // 2. Configure model loading
         auto mparams = llama_model_default_params();
-        
-        // Fully offload layers to VRAM for Titan tier nodes
         if (config->tier >= PerformanceTier::TITAN) {
-            mparams.n_gpu_layers = 99;
-            std::cout << "[AI] Performance tier: Titan. GPU acceleration enabled." << std::endl;
+            mparams.n_gpu_layers = 99; // Attempt full VRAM offload
         }
 
-        // 3. Load model and link vocabulary
         g_state.model = llama_load_model_from_file(config->model_path, mparams);
         if (!g_state.model) return PxmStatus::ERROR_INIT_FAILED;
 
         g_state.vocab = llama_model_get_vocab(g_state.model);
-        if (!g_state.vocab) return PxmStatus::ERROR_INIT_FAILED;
-
-        // 4. Initialize execution context
+        
         auto cparams = llama_context_default_params();
         cparams.n_ctx = 2048; 
         cparams.n_batch = 512;
@@ -85,16 +77,17 @@ extern "C" {
     }
 
     /**
-     * Generates text based on the user prompt.
+     * Main inference loop with explicit batch allocation to prevent crashes.
      */
     PXM_API const char* pxm_generate(const char* prompt) {
         if (!g_state.model_ready || !g_state.vocab || !g_state.ctx) {
-            return "[System] AI engine offline: Model not loaded.";
+            return "[System] AI engine offline.";
         }
 
         g_state.last_response = "";
+        std::cout << "[AI] Tokenizing input..." << std::endl;
         
-        // 1. Tokenize prompt
+        // 1. Tokenization
         std::vector<llama_token> tokens;
         tokens.resize(strlen(prompt) + 16);
         int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), true, true);
@@ -102,61 +95,73 @@ extern "C" {
 
         if (tokens.empty()) return "";
 
-        // 2. Prepare initial batch and request logits for the last token
-        llama_batch batch = llama_batch_get_one(tokens.data(), (int)tokens.size());
-        batch.logits[batch.n_tokens - 1] = true; // CRITICAL FIX: Tell llama.cpp to calculate logits
+        // 2. Explicit batch initialization (prevents NULL pointer crashes)
+        // We allocate enough space for the prompt and subsequent generation steps.
+        llama_batch batch = llama_batch_init(std::max(n_tokens, 512), 0, 1);
+        
+        // Fill batch with prompt tokens
+        for (int i = 0; i < n_tokens; i++) {
+            batch.token[i] = tokens[i];
+            batch.pos[i]   = i;
+            batch.n_seq_id[i] = 1;
+            batch.seq_id[i][0] = 0;
+            batch.logits[i] = false;
+        }
+        batch.n_tokens = n_tokens;
+        batch.logits[batch.n_tokens - 1] = true; // We need logits for the last token to start generation
+
+        std::cout << "[AI] Decoding prompt (" << n_tokens << " tokens)..." << std::endl;
 
         int n_cur = 0;
-        int n_max = 256;
+        int n_max = 128; // Safety limit for testing
 
-        // 3. Inference loop
+        // 3. Generation loop
         while (n_cur < n_max) {
             if (llama_decode(g_state.ctx, batch)) {
-                return "[Error] Failed to evaluate tokens.";
+                std::cerr << "[AI] Decode failed!" << std::endl;
+                break;
             }
 
-            // Get logits for the last token in the batch
             auto* logits = llama_get_logits_ith(g_state.ctx, batch.n_tokens - 1);
-            if (!logits) break; // Safety check to prevent crash
+            if (!logits) {
+                std::cerr << "[AI] CRITICAL: Logits are NULL!" << std::endl;
+                break;
+            }
             
-            auto n_vocab = llama_n_vocab(g_state.vocab);
-            
-            // Simple greedy sampling
+            // Greedy sampling
             llama_token next_token = 0;
             float max_logit = -1e10;
-            for (int i = 0; i < n_vocab; i++) {
+            for (int i = 0; i < llama_n_vocab(g_state.vocab); i++) {
                 if (logits[i] > max_logit) {
                     max_logit = logits[i];
                     next_token = i;
                 }
             }
 
-            // Stop on EOS
             if (next_token == llama_token_eos(g_state.vocab)) break;
 
-            // 4. Convert token to string piece
+            // Convert token to piece
             char buf[256];
             int n = llama_token_to_piece(g_state.vocab, next_token, buf, sizeof(buf), 0, true);
             if (n > 0) g_state.last_response.append(buf, n);
 
-            // 5. Update batch for next single token and request logits again
-            batch = llama_batch_get_one(&next_token, 1);
-            batch.pos[0] = (llama_pos)(tokens.size() + n_cur); 
-            batch.logits[0] = true; // Request logits for the next step
+            // Prepare batch for ONLY the next single token
+            batch.token[0]  = next_token;
+            batch.pos[0]    = n_tokens + n_cur;
+            batch.n_tokens  = 1;
+            batch.logits[0] = true; 
             
             n_cur++;
         }
 
+        llama_batch_free(batch); // Don't forget to free allocated memory!
         return g_state.last_response.c_str();
     }
 
-    /**
-     * Releases all allocated resources.
-     */
     PXM_API void pxm_shutdown() {
         if (g_state.ctx) llama_free(g_state.ctx);
         if (g_state.model) llama_free_model(g_state.model);
         llama_backend_free();
-        std::cout << "[AI] GPU and CPU resources released." << std::endl;
+        std::cout << "[AI] Resources released." << std::endl;
     }
 }
