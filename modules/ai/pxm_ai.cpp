@@ -61,13 +61,12 @@ extern "C" {
             return PxmStatus::ERROR_INIT_FAILED;
         }
 
-        // Check if GPU was actually used
-        int actual_gpu_layers = llama_model_n_gpu_layers(g_state.model);
-        if (actual_gpu_layers > 0) {
-            std::cout << "[AI] Acceleration ACTIVE: " << actual_gpu_layers << " layers in VRAM." << std::endl;
+        // Check if we requested GPU offloading
+        if (mparams.n_gpu_layers > 0) {
+            std::cout << "[AI] Acceleration requested: Attempted to offload layers to VRAM." << std::endl;
             g_state.gpu_active = true;
         } else {
-            std::cout << "[AI] Acceleration INACTIVE: Running on CPU." << std::endl;
+            std::cout << "[AI] Running in CPU-only mode." << std::endl;
         }
 
         return PxmStatus::OK;
