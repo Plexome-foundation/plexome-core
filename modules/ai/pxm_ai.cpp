@@ -78,7 +78,7 @@ extern "C" {
         g_state.vocab = llama_model_get_vocab(g_state.model);
         auto cparams = llama_context_default_params();
         cparams.n_ctx = 2048; 
-        cparams.n_batch = 512;
+        cparams.n_batch = 2048;
       
 
      
