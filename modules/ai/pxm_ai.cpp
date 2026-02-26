@@ -74,7 +74,8 @@ extern "C" {
         auto cparams = llama_context_default_params();
         cparams.n_ctx = 2048; 
         cparams.n_batch = 512;
-
+        cparams.n_threads = 4;
+        cparams.n_threads_batch = 4;
         g_state.ctx = llama_new_context_with_model(g_state.model, cparams);
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
