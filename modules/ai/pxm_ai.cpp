@@ -1,7 +1,7 @@
 /**
- * Plexome Core v2.0 - AI Engine (Sync Memory Edition)
+ * Plexome Core v2.0 - AI Engine (Stable Sync Edition)
  * Author: Georgii
- * Uses KV cache cell count for perfect sequence alignment.
+ * Uses current llama.cpp b2800+ API for token counting and context sync.
  */
 
 #define NOMINMAX
@@ -26,7 +26,7 @@ struct AiState {
 static AiState g_state;
 
 /**
- * Advanced filter to remove chat templates and system instructions.
+ * Removes technical chat headers and metadata from the output.
  */
 void clean_output(std::string& text) {
     const std::vector<std::string> junk = {
@@ -36,7 +36,6 @@ void clean_output(std::string& text) {
     for (const auto& tag : junk) {
         size_t pos = 0;
         while ((pos = text.find(tag, pos)) != std::string::npos) {
-            // Find end of line if it's a header like "## Instruction"
             if (tag[0] == '#' || tag[0] == '*') {
                 size_t line_end = text.find('\n', pos);
                 if (line_end != std::string::npos) text.erase(pos, line_end - pos + 1);
@@ -50,7 +49,7 @@ void clean_output(std::string& text) {
 
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome AI Engine", "2.6.0-sync", "Self-synchronizing AI memory unit." };
+        return { "Plexome AI Engine", "2.7.0-stable", "AI unit with automated KV sync." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
@@ -64,7 +63,7 @@ extern "C" {
 
         auto mparams = llama_model_default_params();
         if (config->tier >= PerformanceTier::TITAN) {
-            mparams.n_gpu_layers = 99; // GPU offload for Titan
+            mparams.n_gpu_layers = 99; // Titan tier offloading
         }
 
         g_state.model = llama_load_model_from_file(config->model_path, mparams);
@@ -79,7 +78,7 @@ extern "C" {
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
         g_state.model_ready = true;
-        std::cout << "[AI] Context synchronized. Memory cell tracking active." << std::endl;
+        std::cout << "[AI] Inference unit ready. Sequence tracking active." << std::endl;
         return PxmStatus::OK;
     }
 
@@ -88,10 +87,11 @@ extern "C" {
 
         g_state.last_response = "";
         
-        // 1. Get current KV cache state from the library
-        int32_t n_past = llama_get_kv_cache_used_cells(g_state.ctx);
+        // 1. Get exact current token count from KV cache
+        // Updated function name for llama.cpp b2800+
+        int32_t n_past = llama_get_kv_cache_token_count(g_state.ctx);
 
-        // 2. Tokenize (Always add BOS if cache is empty)
+        // 2. Tokenize prompt
         std::vector<llama_token> tokens;
         tokens.resize(strlen(prompt) + 16);
         int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), n_past == 0, true);
@@ -99,11 +99,13 @@ extern "C" {
 
         if (tokens.empty()) return "";
 
-        // 3. Prepare batch with automatic sync
-        llama_batch batch = llama_batch_init((std::max)(n_tokens, 512), 0, 1);
+        // 3. Setup batch with explicit memory allocation
+        int32_t n_alloc = (std::max)(n_tokens, 512);
+        llama_batch batch = llama_batch_init(n_alloc, 0, 1);
+        
         for (int i = 0; i < n_tokens; i++) {
             batch.token[i] = tokens[i];
-            batch.pos[i]   = n_past + i; // Perfectly consecutive
+            batch.pos[i]   = n_past + i; // Perfectly align Y = X + 1
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
             batch.logits[i] = false;
@@ -114,7 +116,7 @@ extern "C" {
         int n_cur = 0;
         int n_max = 256; 
 
-        // 4. Inference loop
+        // 4. Generation loop
         while (n_cur < n_max) {
             if (llama_decode(g_state.ctx, batch)) break;
 
@@ -143,7 +145,7 @@ extern "C" {
             n_cur++;
         }
 
-        clean_output(g_state.last_response); // Remove garbage
+        clean_output(g_state.last_response); // Cleanup instructions/notes
         llama_batch_free(batch);
         return g_state.last_response.c_str();
     }
