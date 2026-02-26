@@ -1,7 +1,7 @@
 /**
- * Plexome Core v2.0 - AI Engine (Stable Sync Edition)
+ * Plexome Core v2.0 - AI Engine (Strict Math Edition)
  * Author: Georgii
- * Uses current llama.cpp b2800+ API for token counting and context sync.
+ * Bypasses unstable llama.cpp KV cache APIs using strict manual token tracking.
  */
 
 #define NOMINMAX
@@ -20,13 +20,14 @@ struct AiState {
     const struct llama_vocab* vocab = nullptr; 
     llama_context* ctx = nullptr;
     bool model_ready = false;
+    int32_t n_past = 0; // The ultimate source of truth for KV cache position
     std::string last_response; 
 };
 
 static AiState g_state;
 
 /**
- * Removes technical chat headers and metadata from the output.
+ * Strips out chat template headers, system notes, and meta-tags.
  */
 void clean_output(std::string& text) {
     const std::vector<std::string> junk = {
@@ -49,7 +50,7 @@ void clean_output(std::string& text) {
 
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome AI Engine", "2.7.0-stable", "AI unit with automated KV sync." };
+        return { "Plexome AI Engine", "2.8.0-pro", "AI with strict manual KV positioning." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
@@ -63,7 +64,7 @@ extern "C" {
 
         auto mparams = llama_model_default_params();
         if (config->tier >= PerformanceTier::TITAN) {
-            mparams.n_gpu_layers = 99; // Titan tier offloading
+            mparams.n_gpu_layers = 99; // Titan offloading
         }
 
         g_state.model = llama_load_model_from_file(config->model_path, mparams);
@@ -77,8 +78,9 @@ extern "C" {
         g_state.ctx = llama_new_context_with_model(g_state.model, cparams);
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
+        g_state.n_past = 0; // Initialize manual tracker
         g_state.model_ready = true;
-        std::cout << "[AI] Inference unit ready. Sequence tracking active." << std::endl;
+        std::cout << "[AI] Pro-level engine initialized. Manual memory tracking active." << std::endl;
         return PxmStatus::OK;
     }
 
@@ -87,25 +89,22 @@ extern "C" {
 
         g_state.last_response = "";
         
-        // 1. Get exact current token count from KV cache
-        // Updated function name for llama.cpp b2800+
-        int32_t n_past = llama_get_kv_cache_token_count(g_state.ctx);
-
-        // 2. Tokenize prompt
+        // 1. Tokenize. Add BOS ONLY if it's the very first message in context
         std::vector<llama_token> tokens;
         tokens.resize(strlen(prompt) + 16);
-        int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), n_past == 0, true);
+        bool add_bos = (g_state.n_past == 0);
+        int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), add_bos, true);
         tokens.resize(n_tokens);
 
         if (tokens.empty()) return "";
 
-        // 3. Setup batch with explicit memory allocation
+        // 2. Initial batch setup
         int32_t n_alloc = (std::max)(n_tokens, 512);
         llama_batch batch = llama_batch_init(n_alloc, 0, 1);
         
         for (int i = 0; i < n_tokens; i++) {
             batch.token[i] = tokens[i];
-            batch.pos[i]   = n_past + i; // Perfectly align Y = X + 1
+            batch.pos[i]   = g_state.n_past + i; // Start exactly where we left off
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
             batch.logits[i] = false;
@@ -116,16 +115,20 @@ extern "C" {
         int n_cur = 0;
         int n_max = 256; 
 
-        // 4. Generation loop
+        // 3. Inference loop
         while (n_cur < n_max) {
             if (llama_decode(g_state.ctx, batch)) break;
+
+            // CRITICAL: We successfully decoded the batch. Advance our strict position counter immediately.
+            g_state.n_past += batch.n_tokens; 
 
             auto* logits = llama_get_logits_ith(g_state.ctx, batch.n_tokens - 1);
             if (!logits) break; 
             
             llama_token next_token = 0;
             float max_logit = -1e10;
-            for (int i = 0; i < llama_n_vocab(g_state.vocab); i++) {
+            auto n_vocab = llama_n_vocab(g_state.vocab);
+            for (int i = 0; i < n_vocab; i++) {
                 if (logits[i] > max_logit) {
                     max_logit = logits[i];
                     next_token = i;
@@ -138,14 +141,15 @@ extern "C" {
             int n = llama_token_to_piece(g_state.vocab, next_token, buf, sizeof(buf), 0, true);
             if (n > 0) g_state.last_response.append(buf, n);
 
+            // Prepare next single-token batch
             batch.token[0]  = next_token;
-            batch.pos[0]    = n_past + n_tokens + n_cur;
+            batch.pos[0]    = g_state.n_past; // Perfect alignment guaranteed by the manual increment above
             batch.n_tokens  = 1;
             batch.logits[0] = true; 
             n_cur++;
         }
 
-        clean_output(g_state.last_response); // Cleanup instructions/notes
+        clean_output(g_state.last_response); // Remove metadata junk
         llama_batch_free(batch);
         return g_state.last_response.c_str();
     }
