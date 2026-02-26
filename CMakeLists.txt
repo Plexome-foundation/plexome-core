@@ -40,12 +40,17 @@ if (MSVC)
 endif()
 
 # ==============================================================================
-# Maximum Compatibility Mode: Disable advanced CPU instruction sets
-# Ensures the node can run on older servers (e.g., legacy Intel Xeon CPUs)
+# Llama.cpp & GGML Strict Compilation Overrides
 # ==============================================================================
+# 1. Force static C++ runtime (/MT) directly through llama's native variables
+set(LLAMA_STATIC_CRTS ON CACHE BOOL "Force static CRT" FORCE)
+set(GGML_STATIC_CRTS ON CACHE BOOL "Force static CRT" FORCE)
+
+# 2. Maximum CPU Compatibility Mode (Disable AVX2/FMA for old servers)
 set(GGML_AVX2 OFF CACHE BOOL "Disable AVX2" FORCE)
 set(GGML_FMA OFF CACHE BOOL "Disable FMA" FORCE)
 set(GGML_AVX512 OFF CACHE BOOL "Disable AVX512" FORCE)
+# ==============================================================================
 
 add_subdirectory(llama.cpp)
 
