@@ -38,6 +38,15 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 if (MSVC)
     add_compile_options(/Zc:char8_t-)
 endif()
+
+# ==============================================================================
+# Maximum Compatibility Mode: Disable advanced CPU instruction sets
+# Ensures the node can run on older servers (e.g., legacy Intel Xeon CPUs)
+# ==============================================================================
+set(GGML_AVX2 OFF CACHE BOOL "Disable AVX2" FORCE)
+set(GGML_FMA OFF CACHE BOOL "Disable FMA" FORCE)
+set(GGML_AVX512 OFF CACHE BOOL "Disable AVX512" FORCE)
+
 add_subdirectory(llama.cpp)
 
 # 2. Global Includes
