@@ -29,7 +29,7 @@ set(CMAKE_LIBRARY_PATH "C:/OpenBLAS/lib" ${CMAKE_LIBRARY_PATH})
 set(CMAKE_PREFIX_PATH "C:/OpenBLAS" ${CMAKE_PREFIX_PATH})
 
 
-set(BLAS_LIBRARIES "C:/OpenBLAS/lib/openblas.lib" CACHE FILEPATH "Path to OpenBLAS library" FORCE)
+set(BLAS_LIBRARIES "C:/OpenBLAS/lib/libopenblas.lib" CACHE FILEPATH "Path to OpenBLAS library" FORCE)
 set(BLAS_INCLUDE_DIRS "C:/OpenBLAS/include" CACHE PATH "Path to OpenBLAS headers" FORCE)
 # ==============================================================================
 add_subdirectory(llama.cpp)
