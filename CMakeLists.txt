@@ -5,6 +5,29 @@ project(PlexomeCore VERSION 2.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ==============================================================================
+# Plexome Core: MSVC Runtime Configuration
+# Enforce Static MSVC Runtime Linking (/MT) to prevent MSVCP140.dll crashes
+# on clean servers. This embeds the C++ standard library into the binaries.
+# ==============================================================================
+if(MSVC)
+    # Modern CMake approach (requires CMake 3.15+)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    
+    # Fallback: Explicitly replace /MD with /MT in default flags
+    # (Ensures that nested projects like llama.cpp don't override the setting)
+    foreach(flag_var
+            CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+            CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
+            CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+            CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO)
+        if(${flag_var} MATCHES "/MD")
+            string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+        endif()
+    endforeach()
+endif()
+# ==============================================================================
+
 # Define output directories for binaries
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -23,7 +46,6 @@ include_directories(llama.cpp/include)
 include_directories(llama.cpp/common)
 
 # 3. Plexome Modules (Target DLLs)
-# Note: We will add source files for these as we progress
 add_library(pxm_ai SHARED modules/ai/pxm_ai.cpp)
 target_compile_definitions(pxm_ai PRIVATE PXM_EXPORT)
 target_link_libraries(pxm_ai PRIVATE llama) # Link against llama core
@@ -49,7 +71,6 @@ target_compile_definitions(pxm_security PRIVATE PXM_EXPORT)
 add_library(pxm_dashboard SHARED modules/dashboard/pxm_dashboard.cpp)
 target_compile_definitions(pxm_dashboard PRIVATE PXM_EXPORT)
 
-
 # 4. Plexome Host (The Main Executable)
 add_executable(plexome_host src/host/main.cpp)
 
@@ -61,4 +82,4 @@ else()
 endif()
 
 # Summary message
-message(STATUS "Plexome 2.0 configured for ${CMAKE_SYSTEM_NAME}")
+message(STATUS "Plexome 2.0 configured for ${CMAKE_SYSTEM_NAME} with Static CRT (/MT)")
