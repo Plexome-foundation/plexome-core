@@ -1,7 +1,8 @@
 /**
- * Plexome Core v2.0 - AI Engine (Strict Math Edition)
+ * Plexome Core v2.0 - AI Engine (Dynamic CPU Edition)
  * Author: Georgii
- * Bypasses unstable llama.cpp KV cache APIs using strict manual token tracking.
+ * Features dynamic thread allocation based on hardware concurrency
+ * and NUMA awareness for optimal performance on any hardware.
  */
 
 #define NOMINMAX
@@ -12,6 +13,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <thread> // Подключаем библиотеку для работы с потоками
 
 namespace fs = std::filesystem;
 
@@ -20,15 +22,12 @@ struct AiState {
     const struct llama_vocab* vocab = nullptr; 
     llama_context* ctx = nullptr;
     bool model_ready = false;
-    int32_t n_past = 0; // The ultimate source of truth for KV cache position
+    int32_t n_past = 0; 
     std::string last_response; 
 };
 
 static AiState g_state;
 
-/**
- * Strips out chat template headers, system notes, and meta-tags.
- */
 void clean_output(std::string& text) {
     const std::vector<std::string> junk = {
         "<|assistant|>", "<|end|>", "<|user|>", "<|system|>",
@@ -50,11 +49,14 @@ void clean_output(std::string& text) {
 
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome AI Engine", "2.8.0-pro", "AI with strict manual KV positioning." };
+        return { "Plexome AI Engine", "3.0.0-dynamic", "AI with auto-scaling thread allocation." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
         if (!config) return PxmStatus::ERROR_INIT_FAILED;
+        
+        // Включаем поддержку NUMA (помогает на многопроцессорных серверах)
+        llama_numa_init(GGML_NUMA_STRATEGY_DISTRIBUTE);
         llama_backend_init();
 
         if (!config->model_path || !fs::exists(config->model_path)) {
@@ -63,8 +65,12 @@ extern "C" {
         }
 
         auto mparams = llama_model_default_params();
+        mparams.use_mmap = true; // Используем память эффективно
+        
         if (config->tier >= PerformanceTier::TITAN) {
-            mparams.n_gpu_layers = 99; // Titan offloading
+            mparams.n_gpu_layers = 99;
+        } else {
+            mparams.n_gpu_layers = 0;
         }
 
         g_state.model = llama_load_model_from_file(config->model_path, mparams);
@@ -74,13 +80,32 @@ extern "C" {
         auto cparams = llama_context_default_params();
         cparams.n_ctx = 2048; 
         cparams.n_batch = 512;
+        cparams.flash_attn = true; // Включаем быстрое внимание
+
+        // ====================================================================
+        // ДИНАМИЧЕСКОЕ РАСПРЕДЕЛЕНИЕ ПОТОКОВ
+        // ====================================================================
+        unsigned int logical_cores = std::thread::hardware_concurrency();
+        if (logical_cores == 0) logical_cores = 4; // Fallback, если ОС не отдала данные
+
+        // Для генерации (n_threads) берем только физические ядра (~половина от логических)
+        // Для обработки промпта (n_threads_batch) используем всю мощь процессора
+        unsigned int physical_cores = (std::max)(1u, logical_cores / 2);
+
+        cparams.n_threads = physical_cores;
+        cparams.n_threads_batch = logical_cores;
+
+        std::cout << "[AI] Hardware detected: " << logical_cores << " logical cores." << std::endl;
+        std::cout << "[AI] Auto-scaling: " << physical_cores << " threads for generation, " 
+                  << logical_cores << " threads for prompt evaluation." << std::endl;
+        // ====================================================================
 
         g_state.ctx = llama_new_context_with_model(g_state.model, cparams);
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
-        g_state.n_past = 0; // Initialize manual tracker
+        g_state.n_past = 0; 
         g_state.model_ready = true;
-        std::cout << "[AI] Pro-level engine initialized. Manual memory tracking active." << std::endl;
+        std::cout << "[AI] Pro-level engine initialized successfully." << std::endl;
         return PxmStatus::OK;
     }
 
@@ -89,7 +114,6 @@ extern "C" {
 
         g_state.last_response = "";
         
-        // 1. Tokenize. Add BOS ONLY if it's the very first message in context
         std::vector<llama_token> tokens;
         tokens.resize(strlen(prompt) + 16);
         bool add_bos = (g_state.n_past == 0);
@@ -98,13 +122,12 @@ extern "C" {
 
         if (tokens.empty()) return "";
 
-        // 2. Initial batch setup
         int32_t n_alloc = (std::max)(n_tokens, 512);
         llama_batch batch = llama_batch_init(n_alloc, 0, 1);
         
         for (int i = 0; i < n_tokens; i++) {
             batch.token[i] = tokens[i];
-            batch.pos[i]   = g_state.n_past + i; // Start exactly where we left off
+            batch.pos[i]   = g_state.n_past + i; 
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
             batch.logits[i] = false;
@@ -115,11 +138,9 @@ extern "C" {
         int n_cur = 0;
         int n_max = 256; 
 
-        // 3. Inference loop
         while (n_cur < n_max) {
             if (llama_decode(g_state.ctx, batch)) break;
 
-            // CRITICAL: We successfully decoded the batch. Advance our strict position counter immediately.
             g_state.n_past += batch.n_tokens; 
 
             auto* logits = llama_get_logits_ith(g_state.ctx, batch.n_tokens - 1);
@@ -141,15 +162,14 @@ extern "C" {
             int n = llama_token_to_piece(g_state.vocab, next_token, buf, sizeof(buf), 0, true);
             if (n > 0) g_state.last_response.append(buf, n);
 
-            // Prepare next single-token batch
             batch.token[0]  = next_token;
-            batch.pos[0]    = g_state.n_past; // Perfect alignment guaranteed by the manual increment above
+            batch.pos[0]    = g_state.n_past; 
             batch.n_tokens  = 1;
             batch.logits[0] = true; 
             n_cur++;
         }
 
-        clean_output(g_state.last_response); // Remove metadata junk
+        clean_output(g_state.last_response); 
         llama_batch_free(batch);
         return g_state.last_response.c_str();
     }
