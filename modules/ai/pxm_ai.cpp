@@ -79,7 +79,8 @@ extern "C" {
         auto cparams = llama_context_default_params();
         cparams.n_ctx = 2048; 
         cparams.n_batch = 2048;
-      
+        cparams.type_k = GGML_TYPE_Q8_0;
+        cparams.type_v = GGML_TYPE_Q8_0;
 
      
         unsigned int logical_cores = std::thread::hardware_concurrency();
