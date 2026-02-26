@@ -46,10 +46,15 @@ endif()
 set(LLAMA_STATIC_CRTS ON CACHE BOOL "Force static CRT" FORCE)
 set(GGML_STATIC_CRTS ON CACHE BOOL "Force static CRT" FORCE)
 
-# 2. Maximum CPU Compatibility Mode (Disable AVX2/FMA for old servers)
+# ==============================================================================
+# Maximum CPU Compatibility Mode (Vanilla x86_64)
+# Disables ALL vector instructions for running on legacy CPUs/VPS
+# ==============================================================================
+set(GGML_AVX OFF CACHE BOOL "Disable AVX" FORCE)
 set(GGML_AVX2 OFF CACHE BOOL "Disable AVX2" FORCE)
-set(GGML_FMA OFF CACHE BOOL "Disable FMA" FORCE)
 set(GGML_AVX512 OFF CACHE BOOL "Disable AVX512" FORCE)
+set(GGML_FMA OFF CACHE BOOL "Disable FMA" FORCE)
+set(GGML_F16C OFF CACHE BOOL "Disable F16C" FORCE)
 # ==============================================================================
 
 add_subdirectory(llama.cpp)
