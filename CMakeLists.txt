@@ -23,9 +23,14 @@ set(GGML_NATIVE ON CACHE BOOL "Enable Native Architecture" FORCE)
 set(GGML_BLAS ON CACHE BOOL "Enable BLAS" FORCE)
 set(GGML_BLAS_VENDOR "OpenBLAS" CACHE STRING "BLAS library" FORCE)
 
-set(OpenBLAS_DIR "C:/OpenBLAS" CACHE PATH "Path to OpenBLAS" FORCE)
-include_directories(${OpenBLAS_DIR}/include)
-link_directories(${OpenBLAS_DIR}/lib)
+
+set(CMAKE_INCLUDE_PATH "C:/OpenBLAS/include" ${CMAKE_INCLUDE_PATH})
+set(CMAKE_LIBRARY_PATH "C:/OpenBLAS/lib" ${CMAKE_LIBRARY_PATH})
+set(CMAKE_PREFIX_PATH "C:/OpenBLAS" ${CMAKE_PREFIX_PATH})
+
+
+set(BLAS_LIBRARIES "C:/OpenBLAS/lib/openblas.lib" CACHE FILEPATH "Path to OpenBLAS library" FORCE)
+set(BLAS_INCLUDE_DIRS "C:/OpenBLAS/include" CACHE PATH "Path to OpenBLAS headers" FORCE)
 # ==============================================================================
 add_subdirectory(llama.cpp)
 
