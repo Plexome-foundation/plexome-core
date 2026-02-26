@@ -1,8 +1,7 @@
 /**
- * Plexome Core v2.0 - AI Engine (NUMA & Xeon Safe Edition)
+ * Plexome Core v2.0 - AI Engine (Strict Math Edition)
  * Author: Georgii
- * Includes strict manual token tracking, mmap=true for large RAM, 
- * and restricted thread pool to prevent STATUS_STACK_BUFFER_OVERRUN on multi-core servers.
+ * Bypasses unstable llama.cpp KV cache APIs using strict manual token tracking.
  */
 
 #define NOMINMAX
@@ -13,7 +12,6 @@
 #include <vector>
 #include <string>
 #include <algorithm>
-#include <stdexcept>
 
 namespace fs = std::filesystem;
 
@@ -27,14 +25,6 @@ struct AiState {
 };
 
 static AiState g_state;
-
-/**
- * Diagnostic logger to catch internal llama.cpp aborts or errors.
- */
-static void llama_log_callback(enum ggml_log_level level, const char * text, void * user_data) {
-    // Print internal core messages directly to our console
-    std::cout << "[LLAMA CORE] " << text;
-}
 
 /**
  * Strips out chat template headers, system notes, and meta-tags.
@@ -60,66 +50,37 @@ void clean_output(std::string& text) {
 
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome AI Engine", "2.9.5-xeon-safe", "AI with strict KV tracking and NUMA thread safety." };
+        return { "Plexome AI Engine", "2.8.0-pro", "AI with strict manual KV positioning." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
         if (!config) return PxmStatus::ERROR_INIT_FAILED;
-        
-        std::cout << "[AI] Initializing engine and attaching diagnostic logger..." << std::endl;
         llama_backend_init();
 
-        // Attach our custom logger to catch underlying ggml/llama crashes
-        llama_log_set(llama_log_callback, nullptr);
-
         if (!config->model_path || !fs::exists(config->model_path)) {
-            std::cerr << "[AI] ERROR: Model file not found at path: " << (config->model_path ? config->model_path : "NULL") << std::endl;
             g_state.model_ready = false;
             return PxmStatus::OK; 
         }
 
         auto mparams = llama_model_default_params();
-        
-        // SERVER FIX 1: Enable MMAP. With 60GB of RAM, mapping the file directly
-        // is safer than trying to fread() 2.2GB into a single heap allocation.
-        mparams.use_mmap = true; 
-        
-        // Disable GPU offloading explicitly for generic server compatibility
-        mparams.n_gpu_layers = 0; 
-
-        std::cout << "[AI] Loading model into RAM (mmap=true, gpu_layers=0)..." << std::endl;
-
-        try {
-            g_state.model = llama_load_model_from_file(config->model_path, mparams);
-        } catch (const std::exception& e) {
-            std::cerr << "[AI] CRITICAL C++ EXCEPTION during model load: " << e.what() << std::endl;
-            return PxmStatus::ERROR_INIT_FAILED;
-        } catch (...) {
-            std::cerr << "[AI] UNKNOWN EXCEPTION during model load!" << std::endl;
-            return PxmStatus::ERROR_INIT_FAILED;
+        if (config->tier >= PerformanceTier::TITAN) {
+            mparams.n_gpu_layers = 99; // Titan offloading
         }
 
-        if (!g_state.model) {
-            std::cerr << "[AI] Model load returned nullptr. Initialization aborted." << std::endl;
-            return PxmStatus::ERROR_INIT_FAILED;
-        }
+        g_state.model = llama_load_model_from_file(config->model_path, mparams);
+        if (!g_state.model) return PxmStatus::ERROR_INIT_FAILED;
 
         g_state.vocab = llama_model_get_vocab(g_state.model);
         auto cparams = llama_context_default_params();
         cparams.n_ctx = 2048; 
         cparams.n_batch = 512;
 
-        // SERVER FIX 2: Restrict Thread Pool. 
-        // Prevents thread pool explosion and memory corruption on NUMA Xeon architectures.
-        cparams.n_threads = 4;
-        cparams.n_threads_batch = 4;
-
         g_state.ctx = llama_new_context_with_model(g_state.model, cparams);
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
         g_state.n_past = 0; // Initialize manual tracker
         g_state.model_ready = true;
-        std::cout << "[AI] Pro-level engine initialized. Xeon Safe Mode active (Threads: 4)." << std::endl;
+        std::cout << "[AI] Pro-level engine initialized. Manual memory tracking active." << std::endl;
         return PxmStatus::OK;
     }
 
