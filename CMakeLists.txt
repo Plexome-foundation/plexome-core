@@ -12,7 +12,12 @@ if (MSVC)
     add_compile_options(/Zc:char8_t-)
 endif()
 
-# Подключаем llama.cpp с настройками по умолчанию (быстро и нативно)
+set(GGML_AVX ON CACHE BOOL "Enable AVX" FORCE)
+set(GGML_AVX2 ON CACHE BOOL "Enable AVX2" FORCE)
+set(GGML_FMA ON CACHE BOOL "Enable FMA" FORCE)
+set(GGML_F16C ON CACHE BOOL "Enable F16C" FORCE)
+set(GGML_NATIVE ON CACHE BOOL "Enable Native Architecture" FORCE)
+
 add_subdirectory(llama.cpp)
 
 include_directories(include)
