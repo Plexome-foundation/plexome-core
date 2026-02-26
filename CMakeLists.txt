@@ -17,7 +17,16 @@ set(GGML_AVX2 ON CACHE BOOL "Enable AVX2" FORCE)
 set(GGML_FMA ON CACHE BOOL "Enable FMA" FORCE)
 set(GGML_F16C ON CACHE BOOL "Enable F16C" FORCE)
 set(GGML_NATIVE ON CACHE BOOL "Enable Native Architecture" FORCE)
+# ==============================================================================
+# HARDWARE ACCELERATION: OpenBLAS (Universal Intel/AMD Math)
+# ==============================================================================
+set(GGML_BLAS ON CACHE BOOL "Enable BLAS" FORCE)
+set(GGML_BLAS_VENDOR "OpenBLAS" CACHE STRING "BLAS library" FORCE)
 
+set(OpenBLAS_DIR "C:/OpenBLAS" CACHE PATH "Path to OpenBLAS" FORCE)
+include_directories(${OpenBLAS_DIR}/include)
+link_directories(${OpenBLAS_DIR}/lib)
+# ==============================================================================
 add_subdirectory(llama.cpp)
 
 include_directories(include)
