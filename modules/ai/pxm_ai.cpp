@@ -1,7 +1,7 @@
 /**
- * Plexome Core v2.0 - AI Engine (Context Persistence Edition)
+ * Plexome Core v2.0 - AI Engine (Stable Dialogue Edition)
  * Author: Georgii
- * Maintains strict sequence positioning to support conversation memory.
+ * Resolves Y = X + 1 sequence errors and filters chat metadata.
  */
 
 #define NOMINMAX
@@ -20,20 +20,32 @@ struct AiState {
     const struct llama_vocab* vocab = nullptr; 
     llama_context* ctx = nullptr;
     bool model_ready = false;
-    int32_t n_past = 0; // Current position in the global context
+    int32_t n_past = 0; // Global position in KV cache
     std::string last_response; 
 };
 
 static AiState g_state;
 
+/**
+ * Utility to remove technical chat tags from model output.
+ */
+void filter_output(std::string& text) {
+    const std::vector<std::string> tags = {"<|assistant|>", "<|end|>", "<|user|>", "<|system|>"};
+    for (const auto& tag : tags) {
+        size_t pos = std::string::npos;
+        while ((pos = text.find(tag)) != std::string::npos) {
+            text.erase(pos, tag.length());
+        }
+    }
+}
+
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome AI Engine", "2.4.5-stable", "AI with persistent memory and VRAM support." };
+        return { "Plexome AI Engine", "2.5.0-dialogue", "Context-persistent AI with clean output." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
         if (!config) return PxmStatus::ERROR_INIT_FAILED;
-        std::cout << "[AI] Initializing persistent engine..." << std::endl;
         llama_backend_init();
 
         if (!config->model_path || !fs::exists(config->model_path)) {
@@ -43,7 +55,7 @@ extern "C" {
 
         auto mparams = llama_model_default_params();
         if (config->tier >= PerformanceTier::TITAN) {
-            mparams.n_gpu_layers = 99; // GPU offload for Titan nodes
+            mparams.n_gpu_layers = 99; // Titan offloading
         }
 
         g_state.model = llama_load_model_from_file(config->model_path, mparams);
@@ -59,28 +71,29 @@ extern "C" {
 
         g_state.n_past = 0; 
         g_state.model_ready = true;
-        std::cout << "[AI] Context memory active (2048 tokens)." << std::endl;
+        std::cout << "[AI] Context brain initialized. Ready for dialogue." << std::endl;
         return PxmStatus::OK;
     }
 
     PXM_API const char* pxm_generate(const char* prompt) {
-        if (!g_state.model_ready || !g_state.vocab || !g_state.ctx) return "[System] Engine offline.";
+        if (!g_state.model_ready || !g_state.ctx) return "[System] Engine offline.";
 
         g_state.last_response = "";
         
-        // 1. Tokenization (No BOS added manually to keep n_past alignment strict)
+        // 1. Tokenize (Add BOS ONLY on the first message)
         std::vector<llama_token> tokens;
         tokens.resize(strlen(prompt) + 16);
-        int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), g_state.n_past == 0, true);
+        bool add_bos = (g_state.n_past == 0); 
+        int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), add_bos, true);
         tokens.resize(n_tokens);
 
         if (tokens.empty()) return "";
 
-        // 2. Initial batch for the new prompt
+        // 2. Prepare batch with precise positional alignment
         llama_batch batch = llama_batch_init((std::max)(n_tokens, 512), 0, 1);
         for (int i = 0; i < n_tokens; i++) {
             batch.token[i] = tokens[i];
-            batch.pos[i]   = g_state.n_past + i; // Strict Y = X + 1 logic
+            batch.pos[i]   = g_state.n_past + i; // Y = X + 1 logic
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
             batch.logits[i] = false;
@@ -111,15 +124,9 @@ extern "C" {
 
             char buf[256];
             int n = llama_token_to_piece(g_state.vocab, next_token, buf, sizeof(buf), 0, true);
-            if (n > 0) {
-                std::string piece(buf, n);
-                // Filtering out chat-specific technical tags
-                if (piece.find("<|assistant|>") == std::string::npos && 
-                    piece.find("<|end|>") == std::string::npos) {
-                    g_state.last_response += piece;
-                }
-            }
+            if (n > 0) g_state.last_response.append(buf, n);
 
+            // Update batch for next token
             batch.token[0]  = next_token;
             batch.pos[0]    = g_state.n_past + n_tokens + n_cur;
             batch.n_tokens  = 1;
@@ -127,7 +134,10 @@ extern "C" {
             n_cur++;
         }
 
-        g_state.n_past += (n_tokens + n_cur); // Save sequence end for next call
+        // Finalize state
+        g_state.n_past += (n_tokens + n_cur);
+        filter_output(g_state.last_response); // Cleanup tags
+        
         llama_batch_free(batch);
         return g_state.last_response.c_str();
     }
