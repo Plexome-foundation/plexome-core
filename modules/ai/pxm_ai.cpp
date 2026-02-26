@@ -1,7 +1,7 @@
 /**
- * Plexome Core v2.0 - AI Engine (Stable Dialogue Edition)
+ * Plexome Core v2.0 - AI Engine (Sync Memory Edition)
  * Author: Georgii
- * Resolves Y = X + 1 sequence errors and filters chat metadata.
+ * Uses KV cache cell count for perfect sequence alignment.
  */
 
 #define NOMINMAX
@@ -20,28 +20,37 @@ struct AiState {
     const struct llama_vocab* vocab = nullptr; 
     llama_context* ctx = nullptr;
     bool model_ready = false;
-    int32_t n_past = 0; // Global position in KV cache
     std::string last_response; 
 };
 
 static AiState g_state;
 
 /**
- * Utility to remove technical chat tags from model output.
+ * Advanced filter to remove chat templates and system instructions.
  */
-void filter_output(std::string& text) {
-    const std::vector<std::string> tags = {"<|assistant|>", "<|end|>", "<|user|>", "<|system|>"};
-    for (const auto& tag : tags) {
-        size_t pos = std::string::npos;
-        while ((pos = text.find(tag)) != std::string::npos) {
-            text.erase(pos, tag.length());
+void clean_output(std::string& text) {
+    const std::vector<std::string> junk = {
+        "<|assistant|>", "<|end|>", "<|user|>", "<|system|>",
+        "## Instruction", "*Note:", "Greetings!"
+    };
+    for (const auto& tag : junk) {
+        size_t pos = 0;
+        while ((pos = text.find(tag, pos)) != std::string::npos) {
+            // Find end of line if it's a header like "## Instruction"
+            if (tag[0] == '#' || tag[0] == '*') {
+                size_t line_end = text.find('\n', pos);
+                if (line_end != std::string::npos) text.erase(pos, line_end - pos + 1);
+                else text.erase(pos);
+            } else {
+                text.erase(pos, tag.length());
+            }
         }
     }
 }
 
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome AI Engine", "2.5.0-dialogue", "Context-persistent AI with clean output." };
+        return { "Plexome AI Engine", "2.6.0-sync", "Self-synchronizing AI memory unit." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
@@ -55,7 +64,7 @@ extern "C" {
 
         auto mparams = llama_model_default_params();
         if (config->tier >= PerformanceTier::TITAN) {
-            mparams.n_gpu_layers = 99; // Titan offloading
+            mparams.n_gpu_layers = 99; // GPU offload for Titan
         }
 
         g_state.model = llama_load_model_from_file(config->model_path, mparams);
@@ -69,9 +78,8 @@ extern "C" {
         g_state.ctx = llama_new_context_with_model(g_state.model, cparams);
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
-        g_state.n_past = 0; 
         g_state.model_ready = true;
-        std::cout << "[AI] Context brain initialized. Ready for dialogue." << std::endl;
+        std::cout << "[AI] Context synchronized. Memory cell tracking active." << std::endl;
         return PxmStatus::OK;
     }
 
@@ -80,20 +88,22 @@ extern "C" {
 
         g_state.last_response = "";
         
-        // 1. Tokenize (Add BOS ONLY on the first message)
+        // 1. Get current KV cache state from the library
+        int32_t n_past = llama_get_kv_cache_used_cells(g_state.ctx);
+
+        // 2. Tokenize (Always add BOS if cache is empty)
         std::vector<llama_token> tokens;
         tokens.resize(strlen(prompt) + 16);
-        bool add_bos = (g_state.n_past == 0); 
-        int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), add_bos, true);
+        int n_tokens = llama_tokenize(g_state.vocab, prompt, (int)strlen(prompt), tokens.data(), (int)tokens.size(), n_past == 0, true);
         tokens.resize(n_tokens);
 
         if (tokens.empty()) return "";
 
-        // 2. Prepare batch with precise positional alignment
+        // 3. Prepare batch with automatic sync
         llama_batch batch = llama_batch_init((std::max)(n_tokens, 512), 0, 1);
         for (int i = 0; i < n_tokens; i++) {
             batch.token[i] = tokens[i];
-            batch.pos[i]   = g_state.n_past + i; // Y = X + 1 logic
+            batch.pos[i]   = n_past + i; // Perfectly consecutive
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
             batch.logits[i] = false;
@@ -104,7 +114,7 @@ extern "C" {
         int n_cur = 0;
         int n_max = 256; 
 
-        // 3. Inference loop
+        // 4. Inference loop
         while (n_cur < n_max) {
             if (llama_decode(g_state.ctx, batch)) break;
 
@@ -126,18 +136,14 @@ extern "C" {
             int n = llama_token_to_piece(g_state.vocab, next_token, buf, sizeof(buf), 0, true);
             if (n > 0) g_state.last_response.append(buf, n);
 
-            // Update batch for next token
             batch.token[0]  = next_token;
-            batch.pos[0]    = g_state.n_past + n_tokens + n_cur;
+            batch.pos[0]    = n_past + n_tokens + n_cur;
             batch.n_tokens  = 1;
             batch.logits[0] = true; 
             n_cur++;
         }
 
-        // Finalize state
-        g_state.n_past += (n_tokens + n_cur);
-        filter_output(g_state.last_response); // Cleanup tags
-        
+        clean_output(g_state.last_response); // Remove garbage
         llama_batch_free(batch);
         return g_state.last_response.c_str();
     }
