@@ -13,8 +13,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
-#include <thread> // Подключаем библиотеку для работы с потоками
-
+#include <thread> 
 namespace fs = std::filesystem;
 
 struct AiState {
@@ -55,7 +54,7 @@ extern "C" {
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
         if (!config) return PxmStatus::ERROR_INIT_FAILED;
         
-        // Включаем поддержку NUMA (помогает на многопроцессорных серверах)
+
         llama_numa_init(GGML_NUMA_STRATEGY_DISTRIBUTE);
         llama_backend_init();
 
@@ -65,7 +64,7 @@ extern "C" {
         }
 
         auto mparams = llama_model_default_params();
-        mparams.use_mmap = true; // Используем память эффективно
+        mparams.use_mmap = true; 
         
         if (config->tier >= PerformanceTier::TITAN) {
             mparams.n_gpu_layers = 99;
@@ -82,14 +81,10 @@ extern "C" {
         cparams.n_batch = 512;
       
 
-        // ====================================================================
-        // ДИНАМИЧЕСКОЕ РАСПРЕДЕЛЕНИЕ ПОТОКОВ
-        // ====================================================================
+     
         unsigned int logical_cores = std::thread::hardware_concurrency();
-        if (logical_cores == 0) logical_cores = 4; // Fallback, если ОС не отдала данные
+        if (logical_cores == 0) logical_cores = 4; 
 
-        // Для генерации (n_threads) берем только физические ядра (~половина от логических)
-        // Для обработки промпта (n_threads_batch) используем всю мощь процессора
         unsigned int physical_cores = (std::max)(1u, logical_cores / 2);
 
         cparams.n_threads = physical_cores;
@@ -98,8 +93,7 @@ extern "C" {
         std::cout << "[AI] Hardware detected: " << logical_cores << " logical cores." << std::endl;
         std::cout << "[AI] Auto-scaling: " << physical_cores << " threads for generation, " 
                   << logical_cores << " threads for prompt evaluation." << std::endl;
-        // ====================================================================
-
+      
         g_state.ctx = llama_new_context_with_model(g_state.model, cparams);
         if (!g_state.ctx) return PxmStatus::ERROR_INIT_FAILED;
 
