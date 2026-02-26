@@ -6,50 +6,32 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ==============================================================================
-# Plexome Core: MSVC Runtime Configuration
-# Enforce Static MSVC Runtime Linking (/MT) to prevent MSVCP140.dll crashes
-# on clean servers. This embeds the C++ standard library into the binaries.
+# Plexome Core: MSVC Runtime Configuration (Static Linking)
 # ==============================================================================
 if(MSVC)
-    # Modern CMake approach (requires CMake 3.15+)
+    # Modern CMake approach to enforce /MT instead of /MD
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    
-    # Fallback: Explicitly replace /MD with /MT in default flags
-    # (Ensures that nested projects like llama.cpp don't override the setting)
-    foreach(flag_var
-            CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-            CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
-            CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-            CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO)
-        if(${flag_var} MATCHES "/MD")
-            string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-        endif()
-    endforeach()
+    add_compile_options(/Zc:char8_t-)
 endif()
-# ==============================================================================
 
 # Define output directories for binaries
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# 1. External Dependency: llama.cpp
-# We treat it as a subdirectory. It will produce its own libraries.
-if (MSVC)
-    add_compile_options(/Zc:char8_t-)
-endif()
-
 # ==============================================================================
 # Llama.cpp & GGML Strict Compilation Overrides
 # ==============================================================================
-# 1. Force static C++ runtime (/MT) directly through llama's native variables
+# 1. Force static C++ runtime inside llama.cpp
 set(LLAMA_STATIC_CRTS ON CACHE BOOL "Force static CRT" FORCE)
 set(GGML_STATIC_CRTS ON CACHE BOOL "Force static CRT" FORCE)
 
-# ==============================================================================
-# Maximum CPU Compatibility Mode (Vanilla x86_64)
-# Disables ALL vector instructions for running on legacy CPUs/VPS
-# ==============================================================================
+# 2. CRITICAL: Disable Native Architecture Auto-Detection
+# This prevents MSVC from optimizing for your build machine's modern CPU
+set(GGML_NATIVE OFF CACHE BOOL "Disable native architecture" FORCE)
+set(LLAMA_NATIVE OFF CACHE BOOL "Disable native architecture" FORCE)
+
+# 3. Maximum CPU Compatibility Mode (Vanilla x86_64)
 set(GGML_AVX OFF CACHE BOOL "Disable AVX" FORCE)
 set(GGML_AVX2 OFF CACHE BOOL "Disable AVX2" FORCE)
 set(GGML_AVX512 OFF CACHE BOOL "Disable AVX512" FORCE)
@@ -57,6 +39,7 @@ set(GGML_FMA OFF CACHE BOOL "Disable FMA" FORCE)
 set(GGML_F16C OFF CACHE BOOL "Disable F16C" FORCE)
 # ==============================================================================
 
+# 1. External Dependency
 add_subdirectory(llama.cpp)
 
 # 2. Global Includes
@@ -100,5 +83,4 @@ else()
     target_link_libraries(plexome_host PRIVATE dl)
 endif()
 
-# Summary message
-message(STATUS "Plexome 2.0 configured for ${CMAKE_SYSTEM_NAME} with Static CRT (/MT)")
+message(STATUS "Plexome 2.0 configured for Universal x86_64 (No AVX, Static CRT)")
