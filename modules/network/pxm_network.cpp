@@ -24,7 +24,9 @@ struct NetworkState {
     SOCKET listen_socket = INVALID_SOCKET;
     std::atomic<bool> is_running = false;
     std::thread server_thread;
-    PerformanceTier current_tier = PerformanceTier::UNKNOWN;
+    
+    // Safe default initialization without relying on specific enum names
+    PerformanceTier current_tier{}; 
 };
 
 static NetworkState g_state;
@@ -62,7 +64,8 @@ void server_loop() {
         }
 
         // 2. Send our handshake back
-        std::string my_tier = (g_state.current_tier == PerformanceTier::TITAN) ? "TITAN" : "STANDARD";
+        // Check for TITAN tier safely
+        std::string my_tier = (g_state.current_tier >= PerformanceTier::TITAN) ? "TITAN" : "STANDARD";
         std::string handshake_msg = "PLEXOME_NODE_V2|TIER:" + my_tier + "\n";
         
         send(client_socket, handshake_msg.c_str(), (int)handshake_msg.length(), 0);
@@ -75,7 +78,7 @@ void server_loop() {
 
 extern "C" {
     PXM_API PxmModuleInfo pxm_get_info() {
-        return { "Plexome P2P Network", "2.1.0-handshake", "TCP listener for peer discovery." };
+        return { "Plexome P2P Network", "2.1.1-handshake", "TCP listener for peer discovery." };
     }
 
     PXM_API PxmStatus pxm_init(const PxmConfig* config) {
